@@ -32,24 +32,7 @@ module.exports = {
         allowNull: false,
         defaultValue: 0
       },
-      availableSlots: {
-        type: Sequelize.INTEGER,
-        allowNull: false,
-        defaultValue: 8
-      },
-      latitude: {
-        type: Sequelize.DECIMAL(10, 8),
-        allowNull: true
-      },
-      longitude: {
-        type: Sequelize.DECIMAL(11, 8),
-        allowNull: true
-      },
-      status: {
-        type: Sequelize.ENUM('active', 'maintenance', 'inactive'),
-        allowNull: false,
-        defaultValue: 'active'
-      },
+      // Tambahkan kolom lainnya sesuai dengan file asli
       createdAt: {
         allowNull: false,
         type: Sequelize.DATE
@@ -60,7 +43,6 @@ module.exports = {
       }
     });
   },
-
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable('ODPs');
   }
