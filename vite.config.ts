@@ -8,6 +8,14 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    // Tambahkan untuk menangani client-side routing
+    historyApiFallback: true,
+  },
+  // Untuk production preview
+  preview: {
+    port: 8080,
+    host: "::",
+    historyApiFallback: true,
   },
   plugins: [
     react(),
@@ -17,6 +25,14 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  // Konfigurasi build untuk SPA
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
     },
   },
 }));

@@ -2,6 +2,11 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 const db = require('../models');
 
+// Pastikan Settings model tersedia
+if (!db.Settings) {
+  console.error('Settings model not found. Make sure it\'s properly defined and imported.');
+}
+
 import { RouterOSAPI } from 'node-routeros';
 
 // Import moment-timezone untuk konsistensi timezone
@@ -16,7 +21,14 @@ function getJakartaTime() {
 const app: Express = express();
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://10.10.10.26:3000',
+    'https://billing.latansa.my.id',
+    'https://api.latansa.my.id'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Test Database Connection
@@ -1577,6 +1589,132 @@ app.get('/', (req: Request, res: Response) => {
   res.send('Hello from RTRW Backend!');
 });
 
+// Settings API Endpoints
+app.get('/api/settings/:key', async (req: Request, res: Response) => {
+  try {
+    const { key } = req.params;
+    const setting = await db.Settings.findByPk(key);
+    
+    if (!setting) {
+      return res.status(404).json({
+        success: false,
+        message: 'Setting not found'
+      });
+    }
+    
+    // Parse JSON value if it's a JSON string
+    let value;
+    try {
+      value = JSON.parse(setting.value);
+    } catch {
+      value = setting.value;
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        key: setting.key,
+        value: value
+      }
+    });
+  } catch (error: any) {
+    console.error('Error fetching setting:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch setting',
+      error: error.message
+    });
+  }
+});
+
+app.put('/api/settings/:key', async (req: Request, res: Response) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    
+    // Convert value to JSON string if it's an object
+    const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    
+    const [setting, created] = await db.Settings.upsert({
+      key: key,
+      value: stringValue
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        key: key,
+        value: value
+      },
+      message: created ? 'Setting created successfully' : 'Setting updated successfully'
+    });
+  } catch (error: any) {
+    console.error('Error saving setting:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save setting',
+      error: error.message
+    });
+  }
+});
+
+// Get WAHA configuration specifically
+app.get('/api/settings/waha', async (req: Request, res: Response) => {
+  try {
+    const setting = await db.Settings.findByPk('waha');
+    
+    if (!setting) {
+      // Return default configuration if not found
+      return res.json({
+        success: true,
+        data: {
+          baseUrl: 'http://localhost:3000',
+          session: '',
+          apiKey: ''
+        }
+      });
+    }
+    
+    const wahaConfig = JSON.parse(setting.value);
+    
+    res.json({
+      success: true,
+      data: wahaConfig
+    });
+  } catch (error: any) {
+    console.error('Error fetching WAHA config:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch WAHA configuration',
+      error: error.message
+    });
+  }
+});
+
+app.put('/api/settings/waha', async (req: Request, res: Response) => {
+  try {
+    const wahaConfig = req.body;
+    
+    await db.Settings.upsert({
+      key: 'waha',
+      value: JSON.stringify(wahaConfig)
+    });
+    
+    res.json({
+      success: true,
+      data: wahaConfig,
+      message: 'WAHA configuration saved successfully'
+    });
+  } catch (error: any) {
+    console.error('Error saving WAHA config:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save WAHA configuration',
+      error: error.message
+    });
+  }
+});
+
 app.listen(port, () => {
   console.log(`⚡️[server]: Server is running at http://localhost:${port}`);
 });
@@ -1662,9 +1800,19 @@ app.get('/api/transactions', async (req: Request, res: Response) => {
     const transactions = await db.Transaction.findAll({
       order: [['createdAt', 'DESC']]
     });
+    
+    // Transform data untuk frontend
+    const transformedTransactions = transactions.map((transaction: any) => ({
+      ...transaction.toJSON(),
+      period: {
+        from: transaction.periodFrom,
+        to: transaction.periodTo
+      }
+    }));
+    
     res.json({
       success: true,
-      data: transactions
+      data: transformedTransactions
     });
   } catch (error: any) {
     console.error('Error fetching transactions:', error);

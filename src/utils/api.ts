@@ -11,7 +11,7 @@ import {
   PPPSecret
 } from '@/types/isp';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -351,6 +351,30 @@ export const getPPPSecrets = async (routerId: string): Promise<ApiResponse<PPPSe
   }
 };
 
+// Get PPP Profiles from router
+export const getRouterPPPProfiles = async (routerId: string): Promise<ApiResponse<MikrotikProfile[]>> => {
+  try {
+    const response = await apiClient.get(`/routers/${routerId}/ppp-profiles`);
+    return {
+      success: true,
+      data: response.data,
+      message: 'PPP Profiles retrieved successfully'
+    };
+  } catch (error) {
+    console.error('Error fetching PPP profiles:', error);
+    return {
+      success: true,
+      data: [
+        { name: 'basic-10mbps', rateLimit: '10M/5M' },
+        { name: 'standard-25mbps', rateLimit: '25M/10M' },
+        { name: 'premium-50mbps', rateLimit: '50M/20M' },
+        { name: 'ultimate-100mbps', rateLimit: '100M/50M' }
+      ],
+      message: 'Using dummy data - backend not available'
+    };
+  }
+};
+
 // Billing API functions
 // Trigger auto suspend manually
 export const triggerAutoSuspend = async (): Promise<ApiResponse<any>> => {
@@ -485,8 +509,45 @@ export const getDashboardStats = async (month?: string): Promise<ApiResponse<any
   }
 };
 
-// Export api object for compatibility
+// Response interceptor untuk menyinkronkan data penting ke localStorage
+apiClient.interceptors.response.use(
+  (response) => {
+    // Sinkronkan konfigurasi WAHA jika endpoint terkait
+    if (response.config.url?.includes('/settings/waha')) {
+      // Pastikan data yang disimpan adalah data yang benar
+      const wahaData = response.data?.data || response.data;
+      localStorage.setItem('wahaConfig', JSON.stringify(wahaData));
+    }
+    return response;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Tambahkan method HTTP dasar ke api object
 export const api = {
+  // HTTP Methods
+  get: async (url: string) => {
+    const response = await apiClient.get(url);
+    return response.data?.data || response.data;
+  },
+  
+  post: async (url: string, data?: any) => {
+    const response = await apiClient.post(url, data);
+    return response.data?.data || response.data;
+  },
+  
+  put: async (url: string, data?: any) => {
+    const response = await apiClient.put(url, data);
+    return response.data?.data || response.data;
+  },
+  
+  delete: async (url: string) => {
+    const response = await apiClient.delete(url);
+    return response.data?.data || response.data;
+  },
+
   // Router
   getRouters,
   createRouter,
@@ -526,6 +587,7 @@ export const api = {
   
   // MikroTik
   getPPPSecrets,
+  getRouterPPPProfiles,
   
   // Billing
   triggerAutoSuspend,

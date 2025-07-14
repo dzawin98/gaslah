@@ -14,7 +14,8 @@ import { useAreas } from '@/hooks/useAreas';
 import { usePackages } from '@/hooks/usePackages';
 import { useODP } from '@/hooks/useODP';
 import { Customer } from '@/types/isp';
-import { toast } from 'sonner';
+import { useToast } from '@/hooks/use-toast';
+import { useWahaConfig } from '../hooks/useWahaConfig';
 
 interface MessageHistory {
   id: string;
@@ -50,6 +51,7 @@ const Messages = () => {
   const { areas } = useAreas();
   const { packages } = usePackages();
   const { odp: odps } = useODP();
+  const { toast } = useToast();
   
   const [showBroadcastForm, setShowBroadcastForm] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
@@ -57,7 +59,7 @@ const Messages = () => {
   const [showAddTemplateDialog, setShowAddTemplateDialog] = useState(false);
   const [messageHistory, setMessageHistory] = useState<MessageHistory[]>([]);
   const [messageTemplates, setMessageTemplates] = useState<MessageTemplate[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
@@ -68,23 +70,24 @@ const Messages = () => {
     category: 'general' as MessageTemplate['category']
   });
   
-  const [wahaConfig, setWahaConfig] = useState({
-    baseUrl: 'http://localhost:3000',
-    session: 'default',
+  const { config, isLoading: wahaLoading, error, updateConfig } = useWahaConfig();
+  
+  const [formConfig, setFormConfig] = useState({
+    baseUrl: '',
+    session: '',
     apiKey: ''
   });
   
-  // Load WAHA config and templates from localStorage on component mount
+  // Update form when API data loads
   useEffect(() => {
-    const savedConfig = localStorage.getItem('wahaConfig');
-    if (savedConfig) {
-      try {
-        setWahaConfig(JSON.parse(savedConfig));
-      } catch (error) {
-        console.error('Error loading WAHA config:', error);
-      }
+    if (config) {
+      console.log('Setting form config from API:', config);
+      setFormConfig(config);
     }
-    
+  }, [config]);
+
+  // Load templates from localStorage
+  useEffect(() => {
     const savedTemplates = localStorage.getItem('messageTemplates');
     if (savedTemplates) {
       try {
@@ -134,7 +137,11 @@ const Messages = () => {
   // Template management functions
   const saveTemplate = () => {
     if (!newTemplate.name.trim() || !newTemplate.content.trim()) {
-      toast.error('Nama dan isi template harus diisi');
+      toast({
+        title: "Error",
+        description: "Nama dan isi template harus diisi",
+        variant: "destructive"
+      });
       return;
     }
 
@@ -149,10 +156,16 @@ const Messages = () => {
     let updatedTemplates;
     if (editingTemplate) {
       updatedTemplates = messageTemplates.map(t => t.id === editingTemplate.id ? template : t);
-      toast.success('Template berhasil diperbarui');
+      toast({
+        title: "Berhasil",
+        description: "Template berhasil diperbarui"
+      });
     } else {
       updatedTemplates = [...messageTemplates, template];
-      toast.success('Template berhasil ditambahkan');
+      toast({
+        title: "Berhasil",
+        description: "Template berhasil ditambahkan"
+      });
     }
 
     setMessageTemplates(updatedTemplates);
@@ -168,7 +181,10 @@ const Messages = () => {
     const updatedTemplates = messageTemplates.filter(t => t.id !== templateId);
     setMessageTemplates(updatedTemplates);
     localStorage.setItem('messageTemplates', JSON.stringify(updatedTemplates));
-    toast.success('Template berhasil dihapus');
+    toast({
+      title: "Berhasil",
+      description: "Template berhasil dihapus"
+    });
   };
 
   const editTemplate = (template: MessageTemplate) => {
@@ -187,7 +203,10 @@ const Messages = () => {
       message: template.content
     }));
     setShowTemplateDialog(false);
-    toast.success(`Template "${template.name}" berhasil dimuat`);
+    toast({
+      title: "Berhasil",
+      description: `Template "${template.name}" berhasil dimuat`
+    });
   };
 
   const getCategoryBadgeColor = (category: MessageTemplate['category']) => {
@@ -418,16 +437,16 @@ const Messages = () => {
         `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
       
       // Cek apakah session tersedia terlebih dahulu
-      const sessionCheck = await fetch(`${wahaConfig.baseUrl}/api/sessions/${wahaConfig.session}`, {
+      const sessionCheck = await fetch(`${config.baseUrl}/api/sessions/${config.session}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          ...(wahaConfig.apiKey && { 'X-Api-Key': wahaConfig.apiKey })
+          ...(config.apiKey && { 'X-Api-Key': config.apiKey })
         }
       });
       
       if (!sessionCheck.ok) {
-        throw new Error(`Session ${wahaConfig.session} tidak tersedia atau tidak aktif`);
+        throw new Error(`Session ${config.session} tidak tersedia atau tidak aktif`);
       }
       
       const sessionData = await sessionCheck.json();
@@ -438,19 +457,19 @@ const Messages = () => {
       // PERBAIKAN: Coba beberapa endpoint yang berbeda
       const endpoints = [
         // Endpoint v1 (paling umum)
-        `${wahaConfig.baseUrl}/api/sendText`,
+        `${config.baseUrl}/api/sendText`,
         // Endpoint v2
-        `${wahaConfig.baseUrl}/api/${wahaConfig.session}/sendText`,
+        `${config.baseUrl}/api/${config.session}/sendText`,
         // Endpoint v3 (swagger style)
-        `${wahaConfig.baseUrl}/api/sessions/${wahaConfig.session}/chats/${chatId}/messages`,
+        `${config.baseUrl}/api/sessions/${config.session}/chats/${chatId}/messages`,
         // Endpoint v4 (alternative)
-        `${wahaConfig.baseUrl}/api/v1/sessions/${wahaConfig.session}/chats/${chatId}/messages/text`
+        `${config.baseUrl}/api/v1/sessions/${config.session}/chats/${chatId}/messages/text`
       ];
       
       const payloads = [
         // Payload v1
         {
-          session: wahaConfig.session,
+          session: config.session,
           chatId: chatId,
           text: message
         },
@@ -478,7 +497,7 @@ const Messages = () => {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(wahaConfig.apiKey && { 'X-Api-Key': wahaConfig.apiKey })
+              ...(config.apiKey && { 'X-Api-Key': config.apiKey })
             },
             body: JSON.stringify(payloads[i])
           });
@@ -505,40 +524,47 @@ const Messages = () => {
 
   // Fungsi untuk test koneksi WAHA
   const testWahaConnection = async () => {
+    if (!formConfig.baseUrl) {
+      toast({
+        title: "Error",
+        description: "Base URL harus diisi",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsTestingConnection(true);
     setConnectionStatus('idle');
     
     try {
-      // Test koneksi ke WAHA
-      const response = await fetch(`${wahaConfig.baseUrl}/api/sessions`, {
-        method: 'GET',
+      const response = await fetch(`${formConfig.baseUrl}/api/sessions`, {
         headers: {
-          'Content-Type': 'application/json',
-          ...(wahaConfig.apiKey && { 'X-Api-Key': wahaConfig.apiKey })
+          'X-API-KEY': formConfig.apiKey || ''
         }
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+      if (response.ok) {
+        setConnectionStatus('success');
+        toast({
+          title: "Berhasil",
+          description: "Koneksi WAHA berhasil!"
+        });
+      } else {
+        setConnectionStatus('error');
+        toast({
+          title: "Error",
+          description: `Koneksi gagal: ${response.status} ${response.statusText}`,
+          variant: "destructive"
+        });
       }
-      
-      const sessions = await response.json();
-      const targetSession = sessions.find((s: any) => s.name === wahaConfig.session);
-      
-      if (!targetSession) {
-        throw new Error(`Session '${wahaConfig.session}' tidak ditemukan`);
-      }
-      
-      if (targetSession.status !== 'WORKING') {
-        throw new Error(`Session '${wahaConfig.session}' status: ${targetSession.status}. Harus WORKING`);
-      }
-      
-      setConnectionStatus('success');
-      toast.success('Koneksi WAHA berhasil!');
     } catch (error) {
-      console.error('Test connection error:', error);
+      console.error('WAHA connection test failed:', error);
       setConnectionStatus('error');
-      toast.error(`Koneksi gagal: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      toast({
+        title: "Error",
+        description: "Koneksi WAHA gagal",
+        variant: "destructive"
+      });
     } finally {
       setIsTestingConnection(false);
     }
@@ -555,18 +581,26 @@ const Messages = () => {
     e.preventDefault();
     
     if (!broadcastData.message.trim()) {
-      toast.error('Pesan tidak boleh kosong');
+      toast({
+        title: "Error",
+        description: "Pesan tidak boleh kosong",
+        variant: "destructive"
+      });
       return;
     }
     
     const targetCustomers = getFilteredCustomers();
     
     if (targetCustomers.length === 0) {
-      toast.error('Tidak ada pelanggan yang sesuai dengan kriteria');
+      toast({
+        title: "Error",
+        description: "Tidak ada pelanggan yang sesuai dengan kriteria",
+        variant: "destructive"
+      });
       return;
     }
     
-    setIsLoading(true);
+    setIsSending(true);
     
     try {
       let successCount = 0;
@@ -626,28 +660,71 @@ const Messages = () => {
       setShowBroadcastForm(false);
       
       if (successCount > 0) {
-        toast.success(`Berhasil mengirim ${successCount} pesan${failedCount > 0 ? `, ${failedCount} gagal` : ''}`);
+        toast({
+          title: "Berhasil",
+          description: `Berhasil mengirim ${successCount} pesan${failedCount > 0 ? `, ${failedCount} gagal` : ''}`
+        });
       }
       
       if (failedCount > 0) {
-        toast.error(`${failedCount} pesan gagal dikirim: ${failedCustomers.slice(0, 3).join(', ')}${failedCustomers.length > 3 ? '...' : ''}`);
+        toast({
+          title: "Error",
+          description: `${failedCount} pesan gagal dikirim: ${failedCustomers.slice(0, 3).join(', ')}${failedCustomers.length > 3 ? '...' : ''}`,
+          variant: "destructive"
+        });
       }
       
     } catch (error) {
       console.error('Error in broadcast:', error);
-      toast.error('Terjadi kesalahan saat mengirim pesan');
+      toast({
+        title: "Error",
+        description: "Terjadi kesalahan saat mengirim pesan",
+        variant: "destructive"
+      });
     } finally {
-      setIsLoading(false);
+      setIsSending(false);
     }
   };
 
-  const saveWahaConfig = () => {
-    localStorage.setItem('wahaConfig', JSON.stringify(wahaConfig));
-    toast.success('Konfigurasi WAHA berhasil disimpan');
-    setShowSettingsDialog(false);
+  const saveWahaConfig = async () => {
+    try {
+      console.log('Saving WAHA config:', formConfig);
+      await updateConfig.mutateAsync(formConfig);
+      
+      // Pastikan localStorage juga terupdate
+      localStorage.setItem('wahaConfig', JSON.stringify(formConfig));
+      
+      toast({
+        title: "Berhasil",
+        description: "Konfigurasi WAHA berhasil disimpan!"
+      });
+    } catch (error) {
+      console.error('Error saving WAHA config:', error);
+      toast({
+        title: "Error",
+        description: "Gagal menyimpan konfigurasi WAHA",
+        variant: "destructive"
+      });
+    }
   };
 
   const filteredCustomers = getFilteredCustomers();
+
+  if (wahaLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-gray-500">Loading WAHA configuration...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-red-500">Error loading WAHA configuration</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -771,8 +848,8 @@ const Messages = () => {
               <Label htmlFor="baseUrl">Base URL WAHA</Label>
               <Input
                 id="baseUrl"
-                value={wahaConfig.baseUrl}
-                onChange={(e) => setWahaConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
+                value={formConfig.baseUrl}
+                onChange={(e) => setFormConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
                 placeholder="http://localhost:3000"
               />
             </div>
@@ -781,8 +858,8 @@ const Messages = () => {
               <Label htmlFor="session">Nama Session</Label>
               <Input
                 id="session"
-                value={wahaConfig.session}
-                onChange={(e) => setWahaConfig(prev => ({ ...prev, session: e.target.value }))}
+                value={formConfig.session}
+                onChange={(e) => setFormConfig(prev => ({ ...prev, session: e.target.value }))}
                 placeholder="default"
               />
             </div>
@@ -791,9 +868,8 @@ const Messages = () => {
               <Label htmlFor="apiKey">API Key (Opsional)</Label>
               <Input
                 id="apiKey"
-                type="password"
-                value={wahaConfig.apiKey}
-                onChange={(e) => setWahaConfig(prev => ({ ...prev, apiKey: e.target.value }))}
+                value={formConfig.apiKey}
+                onChange={(e) => setFormConfig(prev => ({ ...prev, apiKey: e.target.value }))}
                 placeholder="Masukkan API key jika diperlukan"
               />
             </div>
@@ -1070,16 +1146,16 @@ const Messages = () => {
                 type="button" 
                 variant="outline" 
                 onClick={() => setShowBroadcastForm(false)}
-                disabled={isLoading}
+                disabled={isSending}
               >
                 Batal
               </Button>
               <Button 
                 type="submit" 
                 className="bg-green-600 hover:bg-green-700"
-                disabled={isLoading || filteredCustomers.length === 0}
+                disabled={isSending || filteredCustomers.length === 0}
               >
-                {isLoading ? (
+                {isSending ? (
                   <>
                     <Clock className="h-4 w-4 mr-2 animate-spin" />
                     Mengirim...

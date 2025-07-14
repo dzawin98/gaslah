@@ -31,6 +31,8 @@ fs
     db[model.name] = model;
   });
 
+db.Settings = require('./settings')(sequelize, Sequelize.DataTypes);
+
 Object.keys(db).forEach(modelName => {
   if (db[modelName].associate) {
     db[modelName].associate(db);

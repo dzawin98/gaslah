@@ -14,6 +14,7 @@ import { api } from '@/utils/api';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useAreas } from '@/hooks/useAreas';
 import { usePackages } from '@/hooks/usePackages';
+import { useWahaConfig } from '@/hooks/useWahaConfig';
 import { Transaction, Customer } from '@/types/isp';
 import { toast } from 'sonner';
 import { getTransactions, createTransaction, updateTransaction, deleteTransaction, updateCustomer } from '@/utils/api';
@@ -62,6 +63,9 @@ const Transactions = () => {
   const [showReceiptDialog, setShowReceiptDialog] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Hooks
+  const { config: wahaConfig } = useWahaConfig();
   
   // Filter states
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
@@ -159,7 +163,6 @@ Tanggal: {paymentDate}
     enabled: true
   });
   
-  // Hooks
   const { customers } = useCustomers();
   const { areas } = useAreas();
   const { packages } = usePackages();
@@ -172,12 +175,71 @@ Tanggal: {paymentDate}
       customer.pppSecret.toLowerCase().includes(searchTerm.toLowerCase())
     ).slice(0, 10); // Limit to 10 results
   };
+
+  // Tambahkan fungsi untuk cek status pembayaran
+  const getPaymentStatus = (customer: Customer) => {
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    
+    const lastPayment = transactions
+        .filter(t => t.customerId === customer.id && t.type === 'payment' && t.status === 'paid')
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    
+    if (!lastPayment) return 'Belum Pernah Bayar';
+    
+    const lastPaymentDate = new Date(lastPayment.period.to);
+    const lastPaymentMonth = lastPaymentDate.getMonth();
+    const lastPaymentYear = lastPaymentDate.getFullYear();
+    
+    if (lastPaymentYear > currentYear || 
+        (lastPaymentYear === currentYear && lastPaymentMonth >= currentMonth)) {
+        return `Lunas s/d ${lastPaymentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`;
+    }
+    
+    return 'Belum Lunas Bulan Ini';
+  };
     const handleCustomerSelect = (customer: Customer) => {
     const today = getJakartaDate();
     
-    // DEFAULT: Selalu gunakan tanggal 1 bulan ini sampai tanggal 1 bulan depan
-    const fromDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    const toDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    // Cek apakah pelanggan sudah bayar untuk bulan ini
+    const currentMonth = today.getUTCMonth();
+    const currentYear = today.getUTCFullYear();
+    
+    // Cari transaksi pembayaran terakhir
+    const lastPayment = transactions
+        .filter(t => t.customerId === customer.id && t.type === 'payment' && t.status === 'paid')
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    
+    let fromDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    let toDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    
+    if (lastPayment && lastPayment.period && lastPayment.period.to) {
+        const lastPaymentDate = new Date(lastPayment.period.to);
+        const lastPaymentMonth = lastPaymentDate.getUTCMonth();
+        const lastPaymentYear = lastPaymentDate.getUTCFullYear();
+        
+        // Jika sudah bayar untuk bulan ini atau lebih baru
+        if (lastPaymentYear > currentYear || 
+            (lastPaymentYear === currentYear && lastPaymentMonth >= currentMonth)) {
+            
+            // Tampilkan peringatan
+            toast.warning(`Pelanggan ${customer.name} sudah lunas untuk periode ${lastPaymentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`);
+            
+            // Tawarkan periode selanjutnya
+            const nextMonth = lastPaymentMonth + 1;
+            const nextYear = nextMonth > 11 ? lastPaymentYear + 1 : lastPaymentYear;
+            const adjustedMonth = nextMonth > 11 ? 0 : nextMonth;
+            
+            fromDate = new Date(Date.UTC(nextYear, adjustedMonth, 1));
+            toDate = new Date(Date.UTC(nextYear, adjustedMonth + 1, 1));
+            
+            // Konfirmasi dengan user
+            if (!confirm(`Pelanggan sudah lunas untuk bulan ini. Lanjutkan dengan periode ${fromDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}?`)) {
+                return; // Batalkan
+            }
+        }
+    }
     
     console.log('=== HANDLE CUSTOMER SELECT (Jakarta Time) ===');
     console.log('Today Jakarta:', today.toISOString());
@@ -285,7 +347,7 @@ Tanggal: {paymentDate}
   };
   
   const generateReceiptUrl = (receiptNumber: string, autoPdf: boolean = false) => {
-    return `http://localhost/nota-pdf/nota.php?receiptNumber=${receiptNumber}`;
+    return `https://nota.latansa.my.id/nota.php?receiptNumber=${receiptNumber}`;
   };
   
   const replaceMessagePlaceholders = (template: string, transaction: Transaction, customer: Customer) => {
@@ -307,14 +369,12 @@ Tanggal: {paymentDate}
     }
     
     try {
-      // Get WAHA config from localStorage
-      const wahaConfigStr = localStorage.getItem('wahaConfig');
-      if (!wahaConfigStr) {
-        console.warn('WAHA config not found. Please configure WAHA settings in Messages page.');
+      // Check WAHA config from hook
+      if (!wahaConfig || !wahaConfig.baseUrl || !wahaConfig.session) {
+        console.warn('WAHA config not found or incomplete:', wahaConfig);
+        toast.error('Konfigurasi WAHA tidak lengkap. Silakan atur di halaman Messages.');
         return;
       }
-      
-      const wahaConfig = JSON.parse(wahaConfigStr);
       
       // Format phone number (remove +, spaces, etc.)
       const formattedPhone = customer.phone.replace(/[^0-9]/g, '');
@@ -854,34 +914,48 @@ Tanggal: {paymentDate}
                   </div>
 
                   {/* Customer Details - Enhanced with confirmation */}
-                  {formData.selectedCustomer && (
-                    <>
-                      <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="font-medium text-green-800">✓ Pelanggan Terpilih</h3>
-                          <Badge variant="secondary" className="bg-green-600 text-white">
-                            {formData.selectedCustomer.customerNumber}
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <span className="text-gray-600">Nama:</span> 
-                            <span className="font-medium ml-1">{formData.selectedCustomer.name}</span>
+                      {formData.selectedCustomer && (
+                        <>
+                          <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="font-medium text-green-800">✓ Pelanggan Terpilih</h3>
+                              <Badge variant="secondary" className="bg-green-600 text-white">
+                                {formData.selectedCustomer.customerNumber}
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-600">Nama:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.name}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">No. Pelanggan:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.customerNumber}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Area:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.area}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Paket:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.package}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-gray-600">No. Pelanggan:</span> 
-                            <span className="font-medium ml-1">{formData.selectedCustomer.customerNumber}</span>
+
+                          {/* Status Pembayaran */}
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">Status Pembayaran:</span>
+                              <span className={`text-sm px-2 py-1 rounded ${
+                                  getPaymentStatus(formData.selectedCustomer).includes('Lunas') 
+                                      ? 'bg-green-100 text-green-700' 
+                                      : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                  {getPaymentStatus(formData.selectedCustomer)}
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-gray-600">Area:</span> 
-                            <span className="font-medium ml-1">{formData.selectedCustomer.area}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-600">Paket:</span> 
-                            <span className="font-medium ml-1">{formData.selectedCustomer.package}</span>
-                          </div>
-                        </div>
-                      </div>
 
                       {/* Payment Details */}
                       <div className="grid grid-cols-2 gap-4">

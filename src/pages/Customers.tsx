@@ -25,12 +25,18 @@ interface WhatsAppSettings {
   enabled: boolean;
 }
 
+// Tambahkan import
+import { useWahaConfig } from '@/hooks/useWahaConfig';
+
 const Customers = () => {
   const { customers, loading, addCustomer, updateCustomer, deleteCustomer } = useCustomers();
   const { areas } = useAreas();
   const { routers } = useRouters();
   const { odp } = useODP();
   const { packages } = usePackages();
+  
+  // Tambahkan hook ini
+  const { config: wahaConfig } = useWahaConfig();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -95,14 +101,12 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
     }
 
     try {
-      // Get WAHA config from localStorage
-      const wahaConfigStr = localStorage.getItem('wahaConfig');
-      if (!wahaConfigStr) {
-        console.warn('WAHA config not found. Please configure WAHA settings in Messages page.');
+      // Ganti bagian localStorage dengan hook:
+      if (!wahaConfig || !wahaConfig.baseUrl || !wahaConfig.session) {
+        console.warn('WAHA config not found or incomplete:', wahaConfig);
+        toast.error('Konfigurasi WAHA tidak lengkap. Silakan atur di halaman Messages.');
         return;
       }
-
-      const wahaConfig = JSON.parse(wahaConfigStr);
 
       // Format phone number (remove +, spaces, etc.)
       const formattedPhone = customerData.phone?.replace(/[^0-9]/g, '') || '';
@@ -198,8 +202,8 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
       throw new Error('Semua endpoint gagal. Periksa konfigurasi WAHA API.');
       
     } catch (error) {
-      console.warn('WhatsApp notification failed:', error);
-      toast.error('Gagal mengirim notifikasi WhatsApp');
+      console.warn('WhatsApp welcome message failed:', error);
+      toast.error('Gagal mengirim pesan WhatsApp');
       return false;
     }
   };
