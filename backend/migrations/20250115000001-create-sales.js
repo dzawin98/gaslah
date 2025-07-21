@@ -3,7 +3,7 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up (queryInterface, Sequelize) {
-    await queryInterface.createTable('ODPs', {
+    await queryInterface.createTable('Sales', {
       id: {
         allowNull: false,
         autoIncrement: true,
@@ -12,27 +12,22 @@ module.exports = {
       },
       name: {
         type: Sequelize.STRING,
-        allowNull: false
-      },
-      location: {
-        type: Sequelize.STRING,
-        allowNull: false
-      },
-      area: {
-        type: Sequelize.STRING,
-        allowNull: false
-      },
-      totalSlots: {
-        type: Sequelize.INTEGER,
         allowNull: false,
-        defaultValue: 8
+        unique: true
       },
-      usedSlots: {
-        type: Sequelize.INTEGER,
+      phone: {
+        type: Sequelize.STRING,
+        allowNull: true
+      },
+      email: {
+        type: Sequelize.STRING,
+        allowNull: true
+      },
+      isActive: {
+        type: Sequelize.BOOLEAN,
         allowNull: false,
-        defaultValue: 0
+        defaultValue: true
       },
-      // Tambahkan kolom lainnya sesuai dengan file asli
       createdAt: {
         allowNull: false,
         type: Sequelize.DATE
@@ -43,12 +38,8 @@ module.exports = {
       }
     });
   },
-<<<<<<<< HEAD:backend/migrations/20250713151223-create-odps.js
 
   async down (queryInterface, Sequelize) {
-========
-  async down(queryInterface, Sequelize) {
->>>>>>>> 29c19e4c47fa75f62a5e62ea7773fe66f86380cc:backend/migrations/20250710000003-create-odp.js
-    await queryInterface.dropTable('ODPs');
+    await queryInterface.dropTable('Sales');
   }
 };

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft } from 'lucide-react';
+import { MapPicker } from '@/components/map/MapPicker';
 import { toast } from 'sonner';
 import { ODP } from '@/types/isp';
 import { useRouters } from '@/hooks/useRouters';
@@ -26,7 +27,7 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
     usedSlots: 0,
     latitude: '',
     longitude: '',
-    status: 'active' as const
+    status: 'active' as 'active' | 'maintenance' | 'inactive'
   });
 
   const { routers, loading: routersLoading } = useRouters();
@@ -90,10 +91,9 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
       usedSlots: formData.usedSlots,
       availableSlots: formData.totalSlots - formData.usedSlots,
       status: formData.status,
-      coordinates: formData.latitude && formData.longitude ? {
-        latitude: parseFloat(formData.latitude),
-        longitude: parseFloat(formData.longitude)
-      } : undefined
+      // Kirim latitude dan longitude sebagai field terpisah sesuai dengan backend
+      latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+      longitude: formData.longitude ? parseFloat(formData.longitude) : null
     };
 
     if (onSubmit) {
@@ -199,29 +199,17 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="latitude">Latitude</Label>
-                  <Input
-                    id="latitude"
-                    type="number"
-                    step="any"
-                    value={formData.latitude}
-                    onChange={(e) => handleInputChange('latitude', e.target.value)}
-                    placeholder="-0.698042"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="longitude">Longitude</Label>
-                  <Input
-                    id="longitude"
-                    type="number"
-                    step="any"
-                    value={formData.longitude}
-                    onChange={(e) => handleInputChange('longitude', e.target.value)}
-                    placeholder="103.017558"
-                  />
-                </div>
+              <div>
+                <Label>Koordinat Lokasi</Label>
+                <MapPicker
+                  latitude={formData.latitude}
+                  longitude={formData.longitude}
+                  onCoordinateChange={(lat, lng) => {
+                    handleInputChange('latitude', lat);
+                    handleInputChange('longitude', lng);
+                  }}
+                  height="300px"
+                />
               </div>
 
               <div>

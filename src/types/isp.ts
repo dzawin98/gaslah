@@ -80,26 +80,40 @@ export interface Customer {
   // pppPassword field removed due to API instability
 }
 
+export interface Sales {
+  id: string | number;
+  name: string;
+  phone?: string;
+  email?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Package {
   id: string;
   name: string;
   description?: string;
-  downloadSpeed: number; // Add this property
-  uploadSpeed: number;   // Add this property
-  speed?: string;        // Keep this for display purposes
-  bandwidth?: {          // Make this optional since we have downloadSpeed/uploadSpeed
+  downloadSpeed: number;
+  uploadSpeed: number;
+  speed?: string;
+  bandwidth?: {
     download: number;
     upload: number;
   };
   price: number;
-  duration: number; // in days
+  duration: number;
   mikrotikProfile: string;
   routerName?: string;
   isActive: boolean;
-  allowUpgradeDowngrade: boolean; // Add this property
-  onlineRegistration: boolean;    // Add this property
-  taxPercentage: number;          // Add this property
-  agentCommission: number;        // Add this property
+  allowUpgradeDowngrade: boolean;
+  onlineRegistration: boolean;
+  taxPercentage: number;
+  agentCommission: number;
+  salesId?: string | number;
+  sales?: Sales;
+  commissionType: 'percentage' | 'nominal';
+  commissionValue: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -318,3 +332,9 @@ export interface AddonFormData {
 }
 
 // Dan seterusnya untuk semua interface
+
+// Hapus semua kode di bawah ini
+// export interface VoucherProfile {}
+// export interface Voucher {}
+// export interface VoucherGenerateRequest {}
+// export interface VoucherBatch {}

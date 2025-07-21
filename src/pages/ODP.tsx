@@ -3,9 +3,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Eye, Edit, Trash2 } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Map, List } from 'lucide-react';
 import { ODPForm } from '@/components/ODPForm';
 import { useODP } from '@/hooks/useODP';
+import { ODPMap } from '@/components/map/ODPMap';
 import { ODP } from '@/types/isp';
 import {
   AlertDialog,
@@ -22,6 +23,7 @@ const ODPPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingODP, setEditingODP] = useState<ODP | null>(null);
   const [deletingODP, setDeletingODP] = useState<ODP | null>(null);
+  const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
   const { odp, loading, addODP, updateODP, deleteODP } = useODP();
 
   const handleAddODP = async (odpData: any) => {
@@ -99,96 +101,138 @@ const ODPPage = () => {
         <p className="text-gray-600">Pengelolaan data ODP</p>
       </div>
 
-      <Button 
-        onClick={() => setShowForm(true)}
-        className="bg-blue-600 hover:bg-blue-700"
-      >
-        <Plus className="h-4 w-4 mr-2" />
-        Tambah ODP
-      </Button>
+      <div className="flex justify-between items-center">
+        <Button 
+          onClick={() => setShowForm(true)}
+          className="bg-blue-600 hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Tambah ODP
+        </Button>
+
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === 'table' ? 'default' : 'outline'}
+            onClick={() => setViewMode('table')}
+            size="sm"
+          >
+            <List className="h-4 w-4 mr-2" />
+            Tabel
+          </Button>
+          <Button
+            variant={viewMode === 'map' ? 'default' : 'outline'}
+            onClick={() => setViewMode('map')}
+            size="sm"
+          >
+            <Map className="h-4 w-4 mr-2" />
+            Peta
+          </Button>
+        </div>
+      </div>
 
       <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>No</TableHead>
-                <TableHead>Nama ODP</TableHead>
-                <TableHead>Area</TableHead>
-                <TableHead>Lokasi</TableHead>
-                <TableHead>Total Slot</TableHead>
-                <TableHead>Terpakai</TableHead>
-                <TableHead>Tersedia</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Koordinat</TableHead>
-                <TableHead>Act</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
+        <CardContent className={viewMode === 'map' ? 'p-4' : 'p-0'}>
+          {viewMode === 'table' ? (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8">
-                    Loading...
-                  </TableCell>
+                  <TableHead>No</TableHead>
+                  <TableHead>Nama ODP</TableHead>
+                  <TableHead>Area</TableHead>
+                  <TableHead>Lokasi</TableHead>
+                  <TableHead>Total Slot</TableHead>
+                  <TableHead>Terpakai</TableHead>
+                  <TableHead>Tersedia</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Koordinat</TableHead>
+                  <TableHead>Act</TableHead>
                 </TableRow>
-              ) : odp.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8">
-                    Tidak ada data ODP
-                  </TableCell>
-                </TableRow>
-              ) : (
-                odp.map((item, index) => (
-                  <TableRow key={item.id}>
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell className="font-medium">{item.name}</TableCell>
-                    <TableCell>{item.area}</TableCell>
-                    <TableCell>{item.location}</TableCell>
-                    <TableCell>{item.totalSlots}</TableCell>
-                    <TableCell>{item.usedSlots}</TableCell>
-                    <TableCell>{item.availableSlots}</TableCell>
-                    <TableCell>{getStatusBadge(item.status)}</TableCell>
-                    <TableCell>
-                      {item.coordinates ? (
-                        <a 
-                          href={`https://www.google.com/maps?q=${item.coordinates.latitude},${item.coordinates.longitude}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="text-blue-600 hover:underline"
-                        >
-                          {`${item.coordinates.latitude},${item.coordinates.longitude}`}
-                        </a>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex space-x-1">
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="h-8 w-8 p-0 bg-yellow-100 text-yellow-600"
-                          onClick={() => setEditingODP(item)}
-                          title="Edit ODP"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="h-8 w-8 p-0 bg-red-100 text-red-600"
-                          onClick={() => setDeletingODP(item)}
-                          title="Delete ODP"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8">
+                      Loading...
                     </TableCell>
                   </TableRow>
-                ))
+                ) : odp.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8">
+                      Tidak ada data ODP
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  odp.map((item, index) => (
+                    <TableRow key={item.id}>
+                      <TableCell>{index + 1}</TableCell>
+                      <TableCell className="font-medium">{item.name}</TableCell>
+                      <TableCell>{item.area}</TableCell>
+                      <TableCell>{item.location}</TableCell>
+                      <TableCell>{item.totalSlots}</TableCell>
+                      <TableCell>{item.usedSlots}</TableCell>
+                      <TableCell>{item.availableSlots}</TableCell>
+                      <TableCell>{getStatusBadge(item.status)}</TableCell>
+                      <TableCell>
+                        {item.coordinates ? (
+                          <a 
+                            href={`https://www.google.com/maps?q=${item.coordinates.latitude},${item.coordinates.longitude}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-blue-600 hover:underline"
+                          >
+                            {`${item.coordinates.latitude},${item.coordinates.longitude}`}
+                          </a>
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex space-x-1">
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="h-8 w-8 p-0 bg-yellow-100 text-yellow-600"
+                            onClick={() => setEditingODP(item)}
+                            title="Edit ODP"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="h-8 w-8 p-0 bg-red-100 text-red-600"
+                            onClick={() => setDeletingODP(item)}
+                            title="Delete ODP"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          ) : (
+            <div>
+              {loading ? (
+                <div className="text-center py-8">
+                  Loading...
+                </div>
+              ) : odp.length === 0 ? (
+                <div className="text-center py-8">
+                  Tidak ada data ODP
+                </div>
+              ) : (
+                <ODPMap 
+                  odps={odp} 
+                  onEdit={(odpItem) => setEditingODP(odpItem)}
+                  onDelete={(odpItem) => setDeletingODP(odpItem)}
+                  onBack={() => setViewMode('table')}
+                />
               )}
-            </TableBody>
-          </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import ReceiptPreview from '../components/ReceiptPreview';
-import { getTransactions, getCustomers } from '../utils/api';
+import { api } from '../utils/api';
 
 const Receipt: React.FC = () => {
   const { receiptNumber } = useParams<{ receiptNumber: string }>();
@@ -12,11 +12,11 @@ const Receipt: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const trxRes = await getTransactions();
+      const trxRes = await api.getTransactions();
       const trx = trxRes.data.find((t: any) => t.receiptNumber === receiptNumber);
       setTransaction(trx);
       if (trx) {
-        const custRes = await getCustomers();
+        const custRes = await api.getCustomers();
         const cust = custRes.data.find((c: any) => c.id === trx.customerId);
         setCustomer(cust);
       }

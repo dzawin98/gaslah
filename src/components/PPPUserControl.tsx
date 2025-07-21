@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from './ui/button';
 import { Loader2, Power, PowerOff, RefreshCw } from 'lucide-react';
-import { disablePPPUser, enablePPPUser, checkPPPUserStatus } from '../utils/api';
+import { api } from '../utils/api';
 import { toast } from 'sonner';
 
 interface PPPUserControlProps {
@@ -19,7 +19,7 @@ const PPPUserControl: React.FC<PPPUserControlProps> = ({ customerId, onStatusCha
     
     setIsLoading(true);
     try {
-      const response = await disablePPPUser(customerId);
+      const response = await api.disablePPPUser(customerId);
       
       if (response.success) {
         setCurrentStatus('disabled');
@@ -40,7 +40,7 @@ const PPPUserControl: React.FC<PPPUserControlProps> = ({ customerId, onStatusCha
     
     setIsLoading(true);
     try {
-      const response = await enablePPPUser(customerId);
+      const response = await api.enablePPPUser(customerId);
       
       if (response.success) {
         setCurrentStatus('active');
@@ -61,7 +61,7 @@ const PPPUserControl: React.FC<PPPUserControlProps> = ({ customerId, onStatusCha
     
     setIsChecking(true);
     try {
-      const response = await checkPPPUserStatus(customerId);
+      const response = await api.checkPPPUserStatus(customerId);
       
       if (response.success) {
         const mikrotikStatus = response.data.mikrotikStatus;

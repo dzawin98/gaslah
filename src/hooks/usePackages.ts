@@ -23,6 +23,8 @@ export const usePackages = () => {
           id: pkg.id.toString(),
           name: pkg.name,
           description: pkg.description || '',
+          downloadSpeed: pkg.downloadSpeed || 0,
+          uploadSpeed: pkg.uploadSpeed || 0,
           bandwidth: {
             download: pkg.downloadSpeed || 0,
             upload: pkg.uploadSpeed || 0
@@ -30,8 +32,16 @@ export const usePackages = () => {
           price: parseFloat(pkg.price) || 0,
           duration: pkg.duration || 30,
           mikrotikProfile: pkg.mikrotikProfile || '',
-          routerName: pkg.routerName || '', // Tambahkan ini
+          routerName: pkg.routerName || '',
           isActive: pkg.isActive !== undefined ? pkg.isActive : true,
+          allowUpgradeDowngrade: pkg.allowUpgradeDowngrade || false,
+          onlineRegistration: pkg.onlineRegistration || false,
+          taxPercentage: pkg.taxPercentage || 0,
+          agentCommission: pkg.agentCommission || 0,
+          salesId: pkg.salesId,
+          sales: pkg.sales,
+          commissionType: pkg.commissionType || 'percentage',
+          commissionValue: parseFloat(pkg.commissionValue) || 0,
           createdAt: new Date(pkg.createdAt),
           updatedAt: new Date(pkg.updatedAt)
         }));
@@ -48,7 +58,7 @@ export const usePackages = () => {
     }
   };
 
-  const addPackage = async (packageData: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const addPackage = async (packageData: any) => {
     try {
       const response = await api.createPackage(packageData);
       

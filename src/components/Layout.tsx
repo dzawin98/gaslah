@@ -12,12 +12,13 @@ import {
   Network,
   LogOut,
   Menu,
-  X
+  X,
+  TrendingUp,
+  // Hapus import Ticket
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
-import ThemeToggle from '@/components/ThemeToggle';
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
@@ -34,6 +35,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { name: 'Pelanggan', href: '/customers', icon: Users },
     { name: 'Pesan', href: '/messages', icon: MessageSquare },
     { name: 'Transaksi', href: '/transactions', icon: CreditCard },
+    // Hapus baris voucher navigation
+    { name: 'Laporan', href: '/reports', icon: TrendingUp },
   ];
 
   const handleLogout = () => {
@@ -49,9 +52,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700">
+      <header className="bg-white shadow-sm border-b">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -60,7 +63,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                 variant="ghost"
                 size="sm"
                 onClick={toggleSidebar}
-                className="text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-700"
+                className="text-gray-600 hover:text-gray-900 hover:bg-gray-100"
               >
                 {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </Button>
@@ -79,16 +82,15 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                     <span className="text-white font-bold text-sm">LA</span>
                   </div>
                 )}
-                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Latansa Billing System</h1>
+                <h1 className="text-xl font-bold text-gray-900">Latansa Billing System</h1>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <ThemeToggle />
               <Button 
                 variant="ghost" 
                 size="sm" 
                 onClick={handleLogout}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
@@ -99,7 +101,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                 </div>
                 <div className="text-sm">
                   <p className="font-medium">{user?.username || 'Admin'}</p>
-                  <p className="text-gray-500 dark:text-gray-400">ADMIN</p>
+                  <p className="text-gray-500">ADMIN</p>
                 </div>
               </div>
             </div>
@@ -109,7 +111,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
       <div className="flex h-[calc(100vh-80px)]">
         {/* Sidebar */}
-        <aside className={`${sidebarOpen ? 'w-64' : 'w-0'} bg-white dark:bg-gray-800 shadow-sm transition-all duration-300 ease-in-out overflow-hidden`}>
+        <aside className={`${sidebarOpen ? 'w-64' : 'w-0'} bg-white shadow-sm transition-all duration-300 ease-in-out overflow-hidden`}>
           <nav className="p-6 space-y-2">
             {navigation.map((item) => {
               const Icon = item.icon;
@@ -121,8 +123,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                   to={item.href}
                   className={`flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                     isActive
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-gray-100'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
                   <Icon className="h-5 w-5 flex-shrink-0" />
@@ -135,7 +137,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
         {/* Main Content */}
         <main className="flex-1 p-6 overflow-hidden">
-          <Card className="h-full overflow-auto dark:bg-gray-800 dark:border-gray-700">
+          <Card className="h-full overflow-auto">
             <div className="p-6">
               {children}
             </div>

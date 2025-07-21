@@ -1,23 +1,23 @@
 {
   "development": {
-    "username": "root",
-    "password": "Dzawin1998@#",
+    "username": "dz",
+    "password": "dz",
     "database": "rtrw_db",
-    "host": "10.10.10.26",
+    "host": "localhost",
     "dialect": "mysql"
   },
   "test": {
-    "username": "root",
-    "password": "Dzawin1998@#",
+      "username": "dz",
+    "password": "dz",
     "database": "rtrw_db",
-    "host": "10.10.10.26",
+    "host": "localhost",
     "dialect": "mysql"
   },
   "production": {
-    "username": "root",
-    "password": "Dzawin1998@#",
+      "username": "dz",
+    "password": "dz",
     "database": "rtrw_db",
-    "host": "10.10.10.26",
+    "host": "localhost",
     "dialect": "mysql"
   }
 }

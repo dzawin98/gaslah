@@ -1,72 +1,58 @@
 import axios from 'axios';
-import { 
-  RouterDevice, 
-  Area, 
-  ODP, 
-  Package, 
-  Customer, 
-  Transaction, 
-  ApiResponse,
-  MikrotikProfile,
-  PPPSecret
-} from '@/types/isp';
+import { RouterDevice, Area, ODP, Package, Customer, Transaction, MikrotikProfile, Sales, VoucherProfile, Voucher, VoucherGenerateRequest, VoucherBatch, PPPSecret } from '@/types/isp';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  message?: string;
+}
 
+interface DashboardStats {
+  totalCustomers: number;
+  activeCustomers: number;
+  totalRevenue: number;
+  monthlyRevenue: number;
+  totalPackages: number;
+  totalRouters: number;
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+// Create axios instance
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Response interceptor for error handling
-apiClient.interceptors.response.use(
-  (response) => response,
+// Request interceptor
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
   (error) => {
-    console.error('API Error:', error);
     return Promise.reject(error);
   }
 );
 
-// Helper function for delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 // Router API functions
-export const getRouters = async (): Promise<ApiResponse<RouterDevice[]>> => {
+const getRouters = async (): Promise<ApiResponse<RouterDevice[]>> => {
   try {
     const response = await apiClient.get('/routers');
     return response.data;
   } catch (error) {
     console.error('Error fetching routers:', error);
-    // Return dummy data as fallback
-    return {
-      success: true,
-      data: [
-        {
-          id: '1',
-          name: 'Router Utama',
-          ipAddress: '192.168.1.1',
-          port: 8728,
-          username: 'admin',
-          password: 'admin123',
-          status: 'online',
-          lastSeen: 'Just now',
-          area: 'Area 1',
-          model: 'RB750Gr3',
-          firmware: '7.1.5',
-          uptime: '1d 2h 30m',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      ],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-export const createRouter = async (routerData: Partial<RouterDevice>): Promise<ApiResponse<RouterDevice>> => {
+const createRouter = async (routerData: Omit<RouterDevice, 'id'>): Promise<ApiResponse<RouterDevice>> => {
   try {
     const response = await apiClient.post('/routers', routerData);
     return response.data;
@@ -76,7 +62,7 @@ export const createRouter = async (routerData: Partial<RouterDevice>): Promise<A
   }
 };
 
-export const updateRouter = async (id: string, routerData: Partial<RouterDevice>): Promise<ApiResponse<RouterDevice>> => {
+const updateRouter = async (id: string, routerData: Partial<RouterDevice>): Promise<ApiResponse<RouterDevice>> => {
   try {
     const response = await apiClient.put(`/routers/${id}`, routerData);
     return response.data;
@@ -86,7 +72,7 @@ export const updateRouter = async (id: string, routerData: Partial<RouterDevice>
   }
 };
 
-export const deleteRouter = async (id: string): Promise<ApiResponse<void>> => {
+const deleteRouter = async (id: string): Promise<ApiResponse<void>> => {
   try {
     const response = await apiClient.delete(`/routers/${id}`);
     return response.data;
@@ -96,9 +82,9 @@ export const deleteRouter = async (id: string): Promise<ApiResponse<void>> => {
   }
 };
 
-export const testRouterConnection = async (id: string): Promise<ApiResponse<any>> => {
+const testRouterConnection = async (id: string): Promise<ApiResponse<{ status: string; message: string }>> => {
   try {
-    const response = await apiClient.post(`/routers/${id}/test-connection`);
+    const response = await apiClient.post(`/routers/${id}/test`);
     return response.data;
   } catch (error) {
     console.error('Error testing router connection:', error);
@@ -107,21 +93,17 @@ export const testRouterConnection = async (id: string): Promise<ApiResponse<any>
 };
 
 // Area API functions
-export const getAreas = async (): Promise<ApiResponse<Area[]>> => {
+const getAreas = async (): Promise<ApiResponse<Area[]>> => {
   try {
     const response = await apiClient.get('/areas');
     return response.data;
   } catch (error) {
     console.error('Error fetching areas:', error);
-    return {
-      success: true,
-      data: [],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-export const createArea = async (areaData: Partial<Area>): Promise<ApiResponse<Area>> => {
+const createArea = async (areaData: Omit<Area, 'id'>): Promise<ApiResponse<Area>> => {
   try {
     const response = await apiClient.post('/areas', areaData);
     return response.data;
@@ -131,7 +113,7 @@ export const createArea = async (areaData: Partial<Area>): Promise<ApiResponse<A
   }
 };
 
-export const updateArea = async (id: string, areaData: Partial<Area>): Promise<ApiResponse<Area>> => {
+const updateArea = async (id: string, areaData: Partial<Area>): Promise<ApiResponse<Area>> => {
   try {
     const response = await apiClient.put(`/areas/${id}`, areaData);
     return response.data;
@@ -141,7 +123,7 @@ export const updateArea = async (id: string, areaData: Partial<Area>): Promise<A
   }
 };
 
-export const deleteArea = async (id: string): Promise<ApiResponse<void>> => {
+const deleteArea = async (id: string): Promise<ApiResponse<void>> => {
   try {
     const response = await apiClient.delete(`/areas/${id}`);
     return response.data;
@@ -152,21 +134,17 @@ export const deleteArea = async (id: string): Promise<ApiResponse<void>> => {
 };
 
 // ODP API functions
-export const getODPs = async (): Promise<ApiResponse<ODP[]>> => {
+const getODPs = async (): Promise<ApiResponse<ODP[]>> => {
   try {
     const response = await apiClient.get('/odps');
     return response.data;
   } catch (error) {
     console.error('Error fetching ODPs:', error);
-    return {
-      success: true,
-      data: [],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-export const createODP = async (odpData: Partial<ODP>): Promise<ApiResponse<ODP>> => {
+const createODP = async (odpData: Omit<ODP, 'id'>): Promise<ApiResponse<ODP>> => {
   try {
     const response = await apiClient.post('/odps', odpData);
     return response.data;
@@ -176,7 +154,7 @@ export const createODP = async (odpData: Partial<ODP>): Promise<ApiResponse<ODP>
   }
 };
 
-export const updateODP = async (id: string, odpData: Partial<ODP>): Promise<ApiResponse<ODP>> => {
+const updateODP = async (id: string, odpData: Partial<ODP>): Promise<ApiResponse<ODP>> => {
   try {
     const response = await apiClient.put(`/odps/${id}`, odpData);
     return response.data;
@@ -186,7 +164,7 @@ export const updateODP = async (id: string, odpData: Partial<ODP>): Promise<ApiR
   }
 };
 
-export const deleteODP = async (id: string): Promise<ApiResponse<void>> => {
+const deleteODP = async (id: string): Promise<ApiResponse<void>> => {
   try {
     const response = await apiClient.delete(`/odps/${id}`);
     return response.data;
@@ -197,21 +175,17 @@ export const deleteODP = async (id: string): Promise<ApiResponse<void>> => {
 };
 
 // Package API functions
-export const getPackages = async (): Promise<ApiResponse<Package[]>> => {
+const getPackages = async (): Promise<ApiResponse<Package[]>> => {
   try {
     const response = await apiClient.get('/packages');
     return response.data;
   } catch (error) {
     console.error('Error fetching packages:', error);
-    return {
-      success: true,
-      data: [],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-export const createPackage = async (packageData: Partial<Package>): Promise<ApiResponse<Package>> => {
+const createPackage = async (packageData: Omit<Package, 'id'>): Promise<ApiResponse<Package>> => {
   try {
     const response = await apiClient.post('/packages', packageData);
     return response.data;
@@ -221,7 +195,7 @@ export const createPackage = async (packageData: Partial<Package>): Promise<ApiR
   }
 };
 
-export const updatePackage = async (id: string, packageData: Partial<Package>): Promise<ApiResponse<Package>> => {
+const updatePackage = async (id: string, packageData: Partial<Package>): Promise<ApiResponse<Package>> => {
   try {
     const response = await apiClient.put(`/packages/${id}`, packageData);
     return response.data;
@@ -231,7 +205,7 @@ export const updatePackage = async (id: string, packageData: Partial<Package>): 
   }
 };
 
-export const deletePackage = async (id: string): Promise<ApiResponse<void>> => {
+const deletePackage = async (id: string): Promise<ApiResponse<void>> => {
   try {
     const response = await apiClient.delete(`/packages/${id}`);
     return response.data;
@@ -242,21 +216,17 @@ export const deletePackage = async (id: string): Promise<ApiResponse<void>> => {
 };
 
 // Customer API functions
-export const getCustomers = async (): Promise<ApiResponse<Customer[]>> => {
+const getCustomers = async (): Promise<ApiResponse<Customer[]>> => {
   try {
     const response = await apiClient.get('/customers');
     return response.data;
   } catch (error) {
     console.error('Error fetching customers:', error);
-    return {
-      success: true,
-      data: [],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-export const createCustomer = async (customerData: Partial<Customer>): Promise<ApiResponse<Customer>> => {
+const createCustomer = async (customerData: Omit<Customer, 'id'>): Promise<ApiResponse<Customer>> => {
   try {
     const response = await apiClient.post('/customers', customerData);
     return response.data;
@@ -266,7 +236,7 @@ export const createCustomer = async (customerData: Partial<Customer>): Promise<A
   }
 };
 
-export const updateCustomer = async (id: string, customerData: Partial<Customer>): Promise<ApiResponse<Customer>> => {
+const updateCustomer = async (id: string, customerData: Partial<Customer>): Promise<ApiResponse<Customer>> => {
   try {
     const response = await apiClient.put(`/customers/${id}`, customerData);
     return response.data;
@@ -276,7 +246,7 @@ export const updateCustomer = async (id: string, customerData: Partial<Customer>
   }
 };
 
-export const deleteCustomer = async (id: string): Promise<ApiResponse<void>> => {
+const deleteCustomer = async (id: string): Promise<ApiResponse<void>> => {
   try {
     const response = await apiClient.delete(`/customers/${id}`);
     return response.data;
@@ -287,21 +257,17 @@ export const deleteCustomer = async (id: string): Promise<ApiResponse<void>> => 
 };
 
 // Transaction API functions
-export const getTransactions = async (): Promise<ApiResponse<Transaction[]>> => {
+const getTransactions = async (): Promise<ApiResponse<Transaction[]>> => {
   try {
     const response = await apiClient.get('/transactions');
     return response.data;
   } catch (error) {
     console.error('Error fetching transactions:', error);
-    return {
-      success: true,
-      data: [],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-export const createTransaction = async (transactionData: Partial<Transaction>): Promise<ApiResponse<Transaction>> => {
+const createTransaction = async (transactionData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Transaction>> => {
   try {
     const response = await apiClient.post('/transactions', transactionData);
     return response.data;
@@ -311,7 +277,7 @@ export const createTransaction = async (transactionData: Partial<Transaction>): 
   }
 };
 
-export const updateTransaction = async (id: string, transactionData: Partial<Transaction>): Promise<ApiResponse<Transaction>> => {
+const updateTransaction = async (id: string, transactionData: Partial<Transaction>): Promise<ApiResponse<Transaction>> => {
   try {
     const response = await apiClient.put(`/transactions/${id}`, transactionData);
     return response.data;
@@ -321,7 +287,7 @@ export const updateTransaction = async (id: string, transactionData: Partial<Tra
   }
 };
 
-export const deleteTransaction = async (id: string): Promise<ApiResponse<void>> => {
+const deleteTransaction = async (id: string): Promise<ApiResponse<void>> => {
   try {
     const response = await apiClient.delete(`/transactions/${id}`);
     return response.data;
@@ -332,54 +298,61 @@ export const deleteTransaction = async (id: string): Promise<ApiResponse<void>> 
 };
 
 // MikroTik API functions
-// Get PPP Secrets from router
-export const getPPPSecrets = async (routerId: string): Promise<ApiResponse<PPPSecret[]>> => {
+const getPPPSecrets = async (routerId: string): Promise<ApiResponse<PPPSecret[]>> => {
   try {
-    const response = await apiClient.get(`/routers/${routerId}/ppp-secrets`);
-    return {
-      success: true,
-      data: response.data,
-      message: 'PPP Secrets retrieved successfully'
-    };
+    const response = await apiClient.get(`/mikrotik/${routerId}/ppp/secrets`);
+    return response.data;
   } catch (error) {
     console.error('Error fetching PPP secrets:', error);
-    return {
-      success: true,
-      data: [],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-// Get PPP Profiles from router
-export const getRouterPPPProfiles = async (routerId: string): Promise<ApiResponse<MikrotikProfile[]>> => {
+const getRouterPPPProfiles = async (routerId: string): Promise<ApiResponse<MikrotikProfile[]>> => {
   try {
-    const response = await apiClient.get(`/routers/${routerId}/ppp-profiles`);
-    return {
-      success: true,
-      data: response.data,
-      message: 'PPP Profiles retrieved successfully'
-    };
+    const response = await apiClient.get(`/mikrotik/${routerId}/ppp/profiles`);
+    return response.data;
   } catch (error) {
     console.error('Error fetching PPP profiles:', error);
-    return {
-      success: true,
-      data: [
-        { name: 'basic-10mbps', rateLimit: '10M/5M' },
-        { name: 'standard-25mbps', rateLimit: '25M/10M' },
-        { name: 'premium-50mbps', rateLimit: '50M/20M' },
-        { name: 'ultimate-100mbps', rateLimit: '100M/50M' }
-      ],
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
+  }
+};
+
+// PPP User Control API functions
+const disablePPPUser = async (customerId: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
+  try {
+    const response = await apiClient.post(`/mikrotik/ppp/disable/${customerId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error disabling PPP user:', error);
+    throw error;
+  }
+};
+
+const enablePPPUser = async (customerId: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
+  try {
+    const response = await apiClient.post(`/mikrotik/ppp/enable/${customerId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error enabling PPP user:', error);
+    throw error;
+  }
+};
+
+const checkPPPUserStatus = async (customerId: string): Promise<ApiResponse<{ status: string; active: boolean }>> => {
+  try {
+    const response = await apiClient.get(`/mikrotik/ppp/status/${customerId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error checking PPP user status:', error);
+    throw error;
   }
 };
 
 // Billing API functions
-// Trigger auto suspend manually
-export const triggerAutoSuspend = async (): Promise<ApiResponse<any>> => {
+const triggerAutoSuspend = async (): Promise<ApiResponse<{ processed: number; suspended: number }>> => {
   try {
-    const response = await apiClient.post('/trigger-auto-suspend');
+    const response = await apiClient.post('/billing/auto-suspend');
     return response.data;
   } catch (error) {
     console.error('Error triggering auto suspend:', error);
@@ -387,10 +360,9 @@ export const triggerAutoSuspend = async (): Promise<ApiResponse<any>> => {
   }
 };
 
-// Generate monthly bills
-export const generateMonthlyBills = async (): Promise<ApiResponse<any>> => {
+const generateMonthlyBills = async (): Promise<ApiResponse<{ generated: number; total: number }>> => {
   try {
-    const response = await apiClient.post('/billing/generate-monthly-bills');
+    const response = await apiClient.post('/billing/generate-monthly');
     return response.data;
   } catch (error) {
     console.error('Error generating monthly bills:', error);
@@ -398,8 +370,7 @@ export const generateMonthlyBills = async (): Promise<ApiResponse<any>> => {
   }
 };
 
-// Suspend overdue customers
-export const suspendOverdueCustomers = async (): Promise<ApiResponse<any>> => {
+const suspendOverdueCustomers = async (): Promise<ApiResponse<{ suspended: number; total: number }>> => {
   try {
     const response = await apiClient.post('/billing/suspend-overdue');
     return response.data;
@@ -409,112 +380,105 @@ export const suspendOverdueCustomers = async (): Promise<ApiResponse<any>> => {
   }
 };
 
-// Test suspend individual customer
-export const testSuspendCustomer = async (customerId: string): Promise<ApiResponse<any>> => {
+const testSuspendCustomer = async (customerId: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
   try {
     const response = await apiClient.post(`/billing/test-suspend/${customerId}`);
     return response.data;
   } catch (error) {
-    console.error('Error testing suspend customer:', error);
+    console.error('Error testing customer suspension:', error);
     throw error;
   }
 };
 
-// Test enable individual customer
-export const testEnableCustomer = async (customerId: string): Promise<ApiResponse<any>> => {
+const testEnableCustomer = async (customerId: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
   try {
     const response = await apiClient.post(`/billing/test-enable/${customerId}`);
     return response.data;
   } catch (error) {
-    console.error('Error testing enable customer:', error);
+    console.error('Error testing customer enable:', error);
     throw error;
   }
 };
 
-// Test suspend customer by name
-export const testSuspendCustomerByName = async (customerName: string): Promise<ApiResponse<any>> => {
+const testSuspendCustomerByName = async (username: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
   try {
-    const response = await apiClient.post('/billing/test-suspend-by-name', { customerName });
+    const response = await apiClient.post(`/billing/test-suspend-by-name/${username}`);
     return response.data;
   } catch (error) {
-    console.error('Error testing suspend customer by name:', error);
+    console.error('Error testing customer suspension by name:', error);
     throw error;
   }
 };
 
-// Test enable customer by name
-export const testEnableCustomerByName = async (customerName: string): Promise<ApiResponse<any>> => {
+const testEnableCustomerByName = async (username: string): Promise<ApiResponse<{ success: boolean; message: string }>> => {
   try {
-    const response = await apiClient.post('/billing/test-enable-by-name', { customerName });
+    const response = await apiClient.post(`/billing/test-enable-by-name/${username}`);
     return response.data;
   } catch (error) {
-    console.error('Error testing enable customer by name:', error);
+    console.error('Error testing customer enable by name:', error);
     throw error;
   }
 };
 
-// PPP User Management API functions
-// Disable PPP user
-export const disablePPPUser = async (customerId: string): Promise<ApiResponse<any>> => {
-  try {
-    const response = await apiClient.post(`/customers/${customerId}/disable-ppp`);
-    return response.data;
-  } catch (error) {
-    console.error('Error disabling PPP user:', error);
-    throw error;
-  }
-};
-
-// Enable PPP user
-export const enablePPPUser = async (customerId: string): Promise<ApiResponse<any>> => {
-  try {
-    const response = await apiClient.post(`/customers/${customerId}/enable-ppp`);
-    return response.data;
-  } catch (error) {
-    console.error('Error enabling PPP user:', error);
-    throw error;
-  }
-};
-
-// Check PPP user status
-export const checkPPPUserStatus = async (customerId: string): Promise<ApiResponse<any>> => {
-  try {
-    const response = await apiClient.post(`/customers/${customerId}/check-ppp-status`);
-    return response.data;
-  } catch (error) {
-    console.error('Error checking PPP user status:', error);
-    throw error;
-  }
-};
+// Remove the first getVouchers function (around line 423) and keep only the one in the voucher section
 
 // Dashboard API functions
-export const getDashboardStats = async (month?: string): Promise<ApiResponse<any>> => {
+const getDashboardStats = async (month?: string): Promise<ApiResponse<DashboardStats>> => {
   try {
     const url = month ? `/dashboard/stats?month=${month}` : '/dashboard/stats';
     const response = await apiClient.get(url);
     return response.data;
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
-    return {
-      success: true,
-      data: {
-        totalCustomers: 0,
-        activeCustomers: 0,
-        suspendedCustomers: 0,
-        totalRevenue: 0,
-        pendingBills: 0
-      },
-      message: 'Using dummy data - backend not available'
-    };
+    throw error;
   }
 };
 
-// Response interceptor untuk menyinkronkan data penting ke localStorage
+// Sales API functions
+const getSales = async (): Promise<ApiResponse<Sales[]>> => {
+  try {
+    const response = await apiClient.get('/sales');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching sales:', error);
+    throw error;
+  }
+};
+
+const createSales = async (salesData: { name: string; phone?: string; email?: string }): Promise<ApiResponse<Sales>> => {
+  try {
+    const response = await apiClient.post('/sales', salesData);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating sales:', error);
+    throw error;
+  }
+};
+
+const updateSales = async (id: string, salesData: Partial<Sales>): Promise<ApiResponse<Sales>> => {
+  try {
+    const response = await apiClient.put(`/sales/${id}`, salesData);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating sales:', error);
+    throw error;
+  }
+};
+
+const deleteSales = async (id: string): Promise<ApiResponse<void>> => {
+  try {
+    const response = await apiClient.delete(`/sales/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting sales:', error);
+    throw error;
+  }
+};
+
+// Response interceptor
 apiClient.interceptors.response.use(
   (response) => {
-    // Sinkronkan konfigurasi WAHA jika endpoint terkait
     if (response.config.url?.includes('/settings/waha')) {
-      // Pastikan data yang disimpan adalah data yang benar
       const wahaData = response.data?.data || response.data;
       localStorage.setItem('wahaConfig', JSON.stringify(wahaData));
     }
@@ -525,7 +489,103 @@ apiClient.interceptors.response.use(
   }
 );
 
-// Tambahkan method HTTP dasar ke api object
+// Voucher API functions
+const getVoucherProfiles = async (): Promise<ApiResponse<VoucherProfile[]>> => {
+  try {
+    const response = await apiClient.get('/vouchers/profiles');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching voucher profiles:', error);
+    throw error;
+  }
+};
+
+const createVoucherProfile = async (profileData: Omit<VoucherProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<VoucherProfile>> => {
+  try {
+    const response = await apiClient.post('/vouchers/profiles', profileData);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating voucher profile:', error);
+    throw error;
+  }
+};
+
+const updateVoucherProfile = async (id: string, profileData: Partial<VoucherProfile>): Promise<ApiResponse<VoucherProfile>> => {
+  try {
+    const response = await apiClient.put(`/vouchers/profiles/${id}`, profileData);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating voucher profile:', error);
+    throw error;
+  }
+};
+
+const deleteVoucherProfile = async (id: string): Promise<ApiResponse<void>> => {
+  try {
+    const response = await apiClient.delete(`/vouchers/profiles/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting voucher profile:', error);
+    throw error;
+  }
+};
+
+const generateVouchers = async (generateData: VoucherGenerateRequest): Promise<ApiResponse<{ batchId: string; vouchers: Voucher[] }>> => {
+  try {
+    const response = await apiClient.post('/vouchers/generate', generateData);
+    return response.data;
+  } catch (error) {
+    console.error('Error generating vouchers:', error);
+    throw error;
+  }
+};
+
+// Keep only this getVouchers function (remove the duplicate one)
+const getVouchers = async (params?: { 
+  batchId?: string; 
+  profileId?: string; 
+  status?: string; 
+  page?: number; 
+  limit?: number; 
+}): Promise<ApiResponse<{ vouchers: Voucher[]; pagination: { total: number; totalPages: number; page: number; limit: number } }>> => {
+  try {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          queryParams.append(key, value.toString());
+        }
+      });
+    }
+    const response = await apiClient.get(`/vouchers?${queryParams.toString()}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching vouchers:', error);
+    throw error;
+  }
+};
+
+const getVoucherBatches = async (): Promise<ApiResponse<VoucherBatch[]>> => {
+  try {
+    const response = await apiClient.get('/vouchers/batches');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching voucher batches:', error);
+    throw error;
+  }
+};
+
+const deleteVoucherBatch = async (batchId: string): Promise<ApiResponse<void>> => {
+  try {
+    const response = await apiClient.delete(`/vouchers/batches/${batchId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting voucher batch:', error);
+    throw error;
+  }
+};
+
+// Main API object
 export const api = {
   // HTTP Methods
   get: async (url: string) => {
@@ -533,12 +593,12 @@ export const api = {
     return response.data?.data || response.data;
   },
   
-  post: async (url: string, data?: any) => {
+  post: async (url: string, data?: unknown) => {
     const response = await apiClient.post(url, data);
     return response.data?.data || response.data;
   },
   
-  put: async (url: string, data?: any) => {
+  put: async (url: string, data?: unknown) => {
     const response = await apiClient.put(url, data);
     return response.data?.data || response.data;
   },
@@ -588,6 +648,9 @@ export const api = {
   // MikroTik
   getPPPSecrets,
   getRouterPPPProfiles,
+  disablePPPUser,
+  enablePPPUser,
+  checkPPPUserStatus,
   
   // Billing
   triggerAutoSuspend,
@@ -599,7 +662,23 @@ export const api = {
   testEnableCustomerByName,
   
   // Dashboard
-  getDashboardStats
+  getDashboardStats,
+  
+  // Sales
+  getSales,
+  createSales,
+  updateSales,
+  deleteSales,
+  
+  // Voucher
+  getVoucherProfiles,
+  createVoucherProfile,
+  updateVoucherProfile,
+  deleteVoucherProfile,
+  generateVouchers,
+  getVouchers,
+  getVoucherBatches,
+  deleteVoucherBatch
 };
 
 export default api;

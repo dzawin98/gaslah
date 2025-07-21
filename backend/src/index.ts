@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 const db = require('../models');
+const { Sales } = require('../models');
 
 // Pastikan Settings model tersedia
 if (!db.Settings) {
@@ -25,7 +26,10 @@ app.use(cors({
   origin: [
     'http://10.10.10.26:3000',
     'https://billing.latansa.my.id',
+    'http://localhost:8080',
+    'http://localhost:3001',
     'https://api.latansa.my.id'
+  
   ],
   credentials: true
 }));
@@ -480,6 +484,74 @@ app.delete('/api/routers/:id', async (req: Request, res: Response) => {
     }
 });
 
+// Add new endpoint for Mikrotik PPP Profiles
+app.get('/api/mikrotik/:id/ppp/profiles', async (req: Request, res: Response) => {
+  try {
+    const router = await db.Router.findByPk(req.params.id);
+    if (!router) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Router not found' 
+      });
+    }
+    
+    try {
+      // Koneksi ke Mikrotik
+      const conn = new RouterOSAPI({
+        host: router.ipAddress,
+        user: router.username,
+        password: router.password,
+        port: router.port || 8728,
+        timeout: 5000
+      });
+      
+      await conn.connect();
+      
+      // Ambil PPP profiles
+      const profiles = await conn.write('/ppp/profile/print');
+      
+      // Transform data to match frontend expectations
+      const transformedProfiles = profiles.map((profile: any) => ({
+        name: profile.name,
+        rateLimit: profile['rate-limit'] || 'unlimited',
+        remoteAddress: profile['remote-address'],
+        localAddress: profile['local-address']
+      }));
+      
+      await conn.close();
+      
+      res.json({
+        success: true,
+        data: transformedProfiles,
+        message: 'PPP profiles retrieved successfully'
+      });
+      
+    } catch (mikrotikError: any) {
+      console.error('Mikrotik connection error:', mikrotikError);
+      // Fallback ke mock data jika koneksi gagal
+      const mockProfiles = [
+        { name: 'basic-10mbps', rateLimit: '10M/5M' },
+        { name: 'standard-25mbps', rateLimit: '25M/10M' },
+        { name: 'premium-50mbps', rateLimit: '50M/20M' },
+        { name: 'ultimate-100mbps', rateLimit: '100M/50M' }
+      ];
+      
+      res.json({
+        success: true,
+        data: mockProfiles,
+        message: 'PPP profiles retrieved (mock data due to connection error)'
+      });
+    }
+  } catch (error: any) {
+    console.error('Error fetching PPP profiles:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch PPP profiles', 
+      error: error.message 
+    });
+  }
+});
+
 // Test router connection endpoint
 app.post('/api/routers/:id/test-connection', async (req: Request, res: Response) => {
   try {
@@ -841,6 +913,11 @@ app.delete('/api/odps/:id', async (req: Request, res: Response) => {
 app.get('/api/packages', async (req: Request, res: Response) => {
   try {
     const packages = await db.Package.findAll({
+      include: [{
+        model: db.Sales,
+        as: 'sales',
+        attributes: ['id', 'name']
+      }],
       order: [['createdAt', 'DESC']]
     });
     
@@ -876,7 +953,10 @@ app.post('/api/packages', async (req: Request, res: Response) => {
       onlineRegistration,
       taxPercentage,
       agentCommission,
-      routerName
+      routerName,
+      salesId,
+      commissionType,
+      commissionValue
     } = req.body;
     
     // Validasi input
@@ -935,7 +1015,10 @@ app.post('/api/packages', async (req: Request, res: Response) => {
       onlineRegistration: onlineRegistration !== undefined ? onlineRegistration : true,
       taxPercentage: taxPercentage || 0,
       agentCommission: agentCommission || 0,
-      routerName: routerName || ''
+      routerName: routerName || '',
+      salesId: salesId || null,
+      commissionType: commissionType || 'percentage',
+      commissionValue: commissionValue || 0
     });
     
     res.status(201).json({
@@ -957,7 +1040,13 @@ app.post('/api/packages', async (req: Request, res: Response) => {
 // Get a single package by id
 app.get('/api/packages/:id', async (req: Request, res: Response) => {
   try {
-    const pkg = await db.Package.findByPk(req.params.id);
+    const pkg = await db.Package.findByPk(req.params.id, {
+      include: [{
+        model: db.Sales,
+        as: 'sales',
+        attributes: ['id', 'name']
+      }]
+    });
     if (!pkg) {
       return res.status(404).json({
         success: false,
@@ -998,7 +1087,10 @@ app.put('/api/packages/:id', async (req: Request, res: Response) => {
       onlineRegistration,
       taxPercentage,
       agentCommission,
-      routerName
+      routerName,
+      salesId,
+      commissionType,
+      commissionValue
     } = req.body;
     
     const pkg = await db.Package.findByPk(id);
@@ -1073,7 +1165,10 @@ app.put('/api/packages/:id', async (req: Request, res: Response) => {
       onlineRegistration: onlineRegistration !== undefined ? onlineRegistration : pkg.onlineRegistration,
       taxPercentage: taxPercentage !== undefined ? taxPercentage : pkg.taxPercentage,
       agentCommission: agentCommission !== undefined ? agentCommission : pkg.agentCommission,
-      routerName: routerName !== undefined ? routerName : pkg.routerName
+      routerName: routerName !== undefined ? routerName : pkg.routerName,
+      salesId: salesId !== undefined ? salesId : pkg.salesId,
+      commissionType: commissionType !== undefined ? commissionType : pkg.commissionType,
+      commissionValue: commissionValue !== undefined ? commissionValue : pkg.commissionValue
     });
     
     res.json({
@@ -1139,7 +1234,10 @@ app.get('/api/routers/:id/ppp-profiles', async (req: Request, res: Response) => 
   try {
     const router = await db.Router.findByPk(req.params.id);
     if (!router) {
-      return res.status(404).json({ message: 'Router not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Router not found' 
+      });
     }
     
     try {
@@ -1148,7 +1246,8 @@ app.get('/api/routers/:id/ppp-profiles', async (req: Request, res: Response) => 
         host: router.ipAddress,
         user: router.username,
         password: router.password,
-        port: router.port || 8728
+        port: router.port || 8728,
+        timeout: 5000
       });
       
       await conn.connect();
@@ -1156,7 +1255,7 @@ app.get('/api/routers/:id/ppp-profiles', async (req: Request, res: Response) => 
       // Ambil PPP profiles
       const profiles = await conn.write('/ppp/profile/print');
       
-      // Transform data
+      // Transform data to match frontend expectations
       const transformedProfiles = profiles.map((profile: any) => ({
         name: profile.name,
         rateLimit: profile['rate-limit'] || 'unlimited',
@@ -1165,9 +1264,14 @@ app.get('/api/routers/:id/ppp-profiles', async (req: Request, res: Response) => 
       }));
       
       await conn.close();
-      res.json(transformedProfiles);
       
-    } catch (mikrotikError) {
+      res.json({
+        success: true,
+        data: transformedProfiles,
+        message: 'PPP profiles retrieved successfully'
+      });
+      
+    } catch (mikrotikError: any) {
       console.error('Mikrotik connection error:', mikrotikError);
       // Fallback ke mock data jika koneksi gagal
       const mockProfiles = [
@@ -1176,11 +1280,20 @@ app.get('/api/routers/:id/ppp-profiles', async (req: Request, res: Response) => 
         { name: 'premium-50mbps', rateLimit: '50M/20M' },
         { name: 'ultimate-100mbps', rateLimit: '100M/50M' }
       ];
-      res.json(mockProfiles);
+      
+      res.json({
+        success: true,
+        data: mockProfiles,
+        message: 'PPP profiles retrieved (mock data due to connection error)'
+      });
     }
   } catch (error: any) {
     console.error('Error fetching PPP profiles:', error);
-    res.status(500).json({ message: 'Failed to fetch PPP profiles', error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to fetch PPP profiles', 
+      error: error.message 
+    });
   }
 });
 
@@ -1712,6 +1825,70 @@ app.put('/api/settings/waha', async (req: Request, res: Response) => {
       message: 'Failed to save WAHA configuration',
       error: error.message
     });
+  }
+});
+
+// Sales endpoints
+app.get('/api/sales', async (req, res) => {
+  try {
+    const sales = await Sales.findAll({
+      order: [['name', 'ASC']]
+    });
+    res.json({ success: true, data: sales });
+  } catch (error) {
+    console.error('Error fetching sales:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch sales' });
+  }
+});
+
+app.post('/api/sales', async (req, res) => {
+  try {
+    const { name, phone, email } = req.body;
+    const sales = await Sales.create({
+      name,
+      phone,
+      email,
+      isActive: true
+    });
+    res.json({ success: true, data: sales });
+  } catch (error) {
+    console.error('Error creating sales:', error);
+    res.status(500).json({ success: false, message: 'Failed to create sales' });
+  }
+});
+
+app.put('/api/sales/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, email, isActive } = req.body;
+    
+    const sales = await Sales.findByPk(id);
+    if (!sales) {
+      return res.status(404).json({ success: false, message: 'Sales not found' });
+    }
+    
+    await sales.update({ name, phone, email, isActive });
+    res.json({ success: true, data: sales });
+  } catch (error) {
+    console.error('Error updating sales:', error);
+    res.status(500).json({ success: false, message: 'Failed to update sales' });
+  }
+});
+
+app.delete('/api/sales/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sales = await Sales.findByPk(id);
+    
+    if (!sales) {
+      return res.status(404).json({ success: false, message: 'Sales not found' });
+    }
+    
+    await sales.destroy();
+    res.json({ success: true, message: 'Sales deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting sales:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete sales' });
   }
 });
 

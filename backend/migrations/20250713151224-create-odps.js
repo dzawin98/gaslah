@@ -32,7 +32,6 @@ module.exports = {
         allowNull: false,
         defaultValue: 0
       },
-      // Tambahkan kolom lainnya sesuai dengan file asli
       createdAt: {
         allowNull: false,
         type: Sequelize.DATE
@@ -43,12 +42,8 @@ module.exports = {
       }
     });
   },
-<<<<<<<< HEAD:backend/migrations/20250713151223-create-odps.js
 
-  async down (queryInterface, Sequelize) {
-========
   async down(queryInterface, Sequelize) {
->>>>>>>> 29c19e4c47fa75f62a5e62ea7773fe66f86380cc:backend/migrations/20250710000003-create-odp.js
     await queryInterface.dropTable('ODPs');
   }
 };

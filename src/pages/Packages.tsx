@@ -56,7 +56,7 @@ const Packages = () => {
           setEditingPackage(null);
         }}
         onSubmit={editingPackage ? handleEditPackage : handleAddPackage}
-        package={editingPackage || undefined}
+        pkg={editingPackage || undefined}
         isEdit={!!editingPackage}
       />
     );
@@ -95,48 +95,57 @@ const Packages = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>No</TableHead>
-                  <TableHead>Nama Paket</TableHead>
-                  <TableHead>Deskripsi</TableHead>
-                  <TableHead>Router</TableHead>
-                  <TableHead>Kecepatan</TableHead>
-                  <TableHead>Harga</TableHead>
-                  <TableHead>Durasi</TableHead>
-                  <TableHead>Mikrotik Profile</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Aksi</TableHead>
+                  <TableHead className="whitespace-nowrap">No</TableHead>
+                  <TableHead className="whitespace-nowrap">Nama Paket</TableHead>
+                  <TableHead className="whitespace-nowrap">Deskripsi</TableHead>
+                  <TableHead className="whitespace-nowrap">Router</TableHead>
+                  <TableHead className="whitespace-nowrap">Kecepatan</TableHead>
+                  <TableHead className="whitespace-nowrap">Harga</TableHead>
+                  <TableHead className="whitespace-nowrap">Durasi</TableHead>
+                  <TableHead className="whitespace-nowrap">Sales</TableHead>
+                  <TableHead className="whitespace-nowrap">Komisi Rp.</TableHead>
+                  <TableHead className="whitespace-nowrap">Mikrotik Profile</TableHead>
+                  <TableHead className="whitespace-nowrap">Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
+                    <TableCell colSpan={12} className="text-center py-8">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : packages.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
+                    <TableCell colSpan={12} className="text-center py-8">
                       Tidak ada data paket
                     </TableCell>
                   </TableRow>
                 ) : (
                   packages.map((pkg, index) => (
                     <TableRow key={pkg.id}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell className="font-medium">{pkg.name}</TableCell>
-                      <TableCell>{pkg.description || '-'}</TableCell>
-                      <TableCell>{(pkg as any).routerName || '-'}</TableCell>
-                      <TableCell>{pkg.bandwidth.download}/{pkg.bandwidth.upload} Mbps</TableCell>
-                      <TableCell>Rp {pkg.price.toLocaleString('id-ID')}</TableCell>
-                      <TableCell>{pkg.duration} hari</TableCell>
-                      <TableCell>{pkg.mikrotikProfile}</TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap">{index + 1}</TableCell>
+                      <TableCell className="font-medium whitespace-nowrap">{pkg.name}</TableCell>
+                      <TableCell className="whitespace-nowrap">{pkg.description || '-'}</TableCell>
+                      <TableCell className="whitespace-nowrap">{(pkg as any).routerName || '-'}</TableCell>
+                      <TableCell className="whitespace-nowrap">{pkg.bandwidth.download}/{pkg.bandwidth.upload} Mbps</TableCell>
+                      <TableCell className="whitespace-nowrap">Rp {pkg.price.toLocaleString('id-ID')}</TableCell>
+                      <TableCell className="whitespace-nowrap">{pkg.duration} hari</TableCell>
+                      <TableCell className="whitespace-nowrap">{pkg.sales?.name || '-'}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                          {pkg.commissionType === 'nominal' 
+                            ? `Rp ${pkg.commissionValue.toLocaleString('id-ID')}` 
+                            : `${pkg.commissionValue}% (Rp ${Math.round(pkg.price * pkg.commissionValue / 100).toLocaleString('id-ID')})`
+                          }
+                        </TableCell>
+                      <TableCell className="whitespace-nowrap">{pkg.mikrotikProfile}</TableCell>
+                      <TableCell className="whitespace-nowrap">
                         <Badge className={pkg.isActive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
                           {pkg.isActive ? 'Aktif' : 'Tidak Aktif'}
                         </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap">
                         <div className="flex items-center space-x-2">
                           <Button
                             variant="outline"

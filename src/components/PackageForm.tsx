@@ -1,40 +1,77 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft } from 'lucide-react';
-import { toast } from 'sonner';
-import { Package, MikrotikProfile } from '@/types/isp';
-import { useRouters } from '@/hooks/useRouters';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Plus, ArrowLeft } from 'lucide-react';
 import { api } from '@/utils/api';
+import { RouterDevice, Sales, Package, MikrotikProfile } from '@/types/isp';
+import { useRouters } from '@/hooks/useRouters';
+import { useToast } from '@/hooks/use-toast';
 
 interface PackageFormProps {
-  onClose: () => void;
-  onSubmit?: (packageData: any) => void;
-  package?: Package;
+  pkg?: Package;
   isEdit?: boolean;
+  onClose: () => void;
+  onSubmit?: (packageData: any) => Promise<void>;
 }
 
-export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }: PackageFormProps) => {
+interface FormData {
+  name: string;
+  description: string;
+  downloadSpeed: number;
+  uploadSpeed: number;
+  price: number;
+  routerName: string;
+  mikrotikProfile: string;
+  salesId: string;
+  commissionType: 'percentage' | 'nominal';
+  commissionValue: number;
+  isActive: boolean;
+}
+
+export const PackageForm: React.FC<PackageFormProps> = ({ pkg, isEdit = false, onClose, onSubmit }) => {
+  const { toast } = useToast();
   const { routers, loading: routersLoading } = useRouters();
-  const [formData, setFormData] = useState({
+  
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     description: '',
     downloadSpeed: 0,
     uploadSpeed: 0,
     price: 0,
-    // duration: 30,  // Remove this line
     routerName: '',
     mikrotikProfile: '',
+    salesId: '',
+    commissionType: 'percentage',
+    commissionValue: 0,
     isActive: true
   });
   
+  const [salesList, setSalesList] = useState<Sales[]>([]);
+  const [newSalesName, setNewSalesName] = useState('');
+  const [showAddSales, setShowAddSales] = useState(false);
   const [pppProfiles, setPppProfiles] = useState<MikrotikProfile[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+
+  // Load sales data
+  useEffect(() => {
+    const loadSales = async () => {
+      try {
+        const response = await api.getSales();
+        if (response.success && response.data) {
+          setSalesList(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading sales:', error);
+      }
+    };
+    loadSales();
+  }, []);
 
   // Load package data when editing
   useEffect(() => {
@@ -45,9 +82,11 @@ export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }:
         downloadSpeed: pkg.bandwidth?.download || 0,
         uploadSpeed: pkg.bandwidth?.upload || 0,
         price: pkg.price || 0,
-        // duration: pkg.duration || 30,  // Remove this line
         routerName: pkg.routerName || '',
         mikrotikProfile: pkg.mikrotikProfile || '',
+        salesId: pkg.salesId?.toString() || '',
+        commissionType: pkg.commissionType || 'percentage',
+        commissionValue: pkg.commissionValue || 0,
         isActive: pkg.isActive !== undefined ? pkg.isActive : true
       });
       
@@ -69,12 +108,20 @@ export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }:
       if (response.success && response.data) {
         setPppProfiles(response.data);
       } else {
-        toast.error('Gagal memuat profile PPP');
+        toast({
+          title: "Error",
+          description: "Gagal memuat profile PPP",
+          variant: "destructive"
+        });
         setPppProfiles([]);
       }
     } catch (error) {
       console.error('Error loading PPP profiles:', error);
-      toast.error('Gagal memuat profile PPP');
+      toast({
+        title: "Error",
+        description: "Gagal memuat profile PPP",
+        variant: "destructive"
+      });
       setPppProfiles([]);
     } finally {
       setLoadingProfiles(false);
@@ -90,13 +137,45 @@ export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }:
 
   const handleRouterChange = (routerName: string) => {
     handleInputChange('routerName', routerName);
-    handleInputChange('mikrotikProfile', ''); // Reset profile when router changes
+    handleInputChange('mikrotikProfile', '');
     
     const selectedRouter = routers.find(r => r.name === routerName);
     if (selectedRouter) {
-      loadPPPProfiles(selectedRouter.id.toString()); // Add .toString()
+      loadPPPProfiles(selectedRouter.id.toString());
     } else {
       setPppProfiles([]);
+    }
+  };
+
+  const handleAddSales = async () => {
+    if (!newSalesName.trim()) {
+      toast({
+        title: "Error",
+        description: "Nama sales harus diisi",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const response = await api.createSales({ name: newSalesName.trim() });
+      if (response.success && response.data) {
+        setSalesList(prev => [...prev, response.data]);
+        setFormData(prev => ({ ...prev, salesId: response.data.id.toString() }));
+        setNewSalesName('');
+        setShowAddSales(false);
+        toast({
+          title: "Sukses",
+          description: "Sales berhasil ditambahkan"
+        });
+      }
+    } catch (error) {
+      console.error('Error adding sales:', error);
+      toast({
+        title: "Error",
+        description: "Gagal menambahkan sales",
+        variant: "destructive"
+      });
     }
   };
 
@@ -104,44 +183,70 @@ export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }:
     e.preventDefault();
     
     if (!formData.name.trim()) {
-      toast.error('Nama paket harus diisi');
+      toast({
+        title: "Error",
+        description: "Nama paket harus diisi",
+        variant: "destructive"
+      });
       return;
     }
 
     if (!formData.routerName) {
-      toast.error('Router harus dipilih');
+      toast({
+        title: "Error",
+        description: "Router harus dipilih",
+        variant: "destructive"
+      });
       return;
     }
 
     if (!formData.mikrotikProfile.trim()) {
-      toast.error('Mikrotik profile harus dipilih');
+      toast({
+        title: "Error",
+        description: "Mikrotik profile harus dipilih",
+        variant: "destructive"
+      });
       return;
     }
 
     if (formData.downloadSpeed <= 0) {
-      toast.error('Kecepatan download harus lebih dari 0');
+      toast({
+        title: "Error",
+        description: "Kecepatan download harus lebih dari 0",
+        variant: "destructive"
+      });
       return;
     }
 
     if (formData.uploadSpeed <= 0) {
-      toast.error('Kecepatan upload harus lebih dari 0');
+      toast({
+        title: "Error",
+        description: "Kecepatan upload harus lebih dari 0",
+        variant: "destructive"
+      });
       return;
     }
 
     if (formData.price <= 0) {
-      toast.error('Harga harus lebih dari 0');
+      toast({
+        title: "Error",
+        description: "Harga harus lebih dari 0",
+        variant: "destructive"
+      });
       return;
     }
 
     const packageData = {
       name: formData.name,
       description: formData.description,
-      downloadSpeed: formData.downloadSpeed,  // Changed from bandwidth.download
-      uploadSpeed: formData.uploadSpeed,      // Changed from bandwidth.upload
+      downloadSpeed: formData.downloadSpeed,
+      uploadSpeed: formData.uploadSpeed,
       price: formData.price,
-      // duration: formData.duration,         // Removed duration field
       routerName: formData.routerName,
       mikrotikProfile: formData.mikrotikProfile,
+      salesId: formData.salesId === 'none' ? null : formData.salesId || null,
+      commissionType: formData.commissionType,
+      commissionValue: formData.commissionValue,
       isActive: formData.isActive
     };
 
@@ -149,7 +254,10 @@ export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }:
       await onSubmit(packageData);
     } else {
       console.log('Package form submitted:', packageData);
-      toast.success(isEdit ? 'Paket berhasil diperbarui' : 'Paket berhasil ditambahkan');
+      toast({
+        title: "Sukses",
+        description: isEdit ? 'Paket berhasil diperbarui' : 'Paket berhasil ditambahkan'
+      });
       onClose();
     }
   };
@@ -274,20 +382,116 @@ export const PackageForm = ({ onClose, onSubmit, package: pkg, isEdit = false }:
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">  {/* Changed from grid-cols-2 to grid-cols-1 */}
+              <div>
+                <Label htmlFor="price">Harga (Rp) *</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  min="0"
+                  value={formData.price}
+                  onChange={(e) => handleInputChange('price', parseInt(e.target.value) || 0)}
+                  placeholder="100000"
+                  required
+                />
+              </div>
+
+              {/* Sales and Commission Section */}
+              <div className="space-y-4 border-t pt-4">
+                <h3 className="text-lg font-medium">Informasi Sales & Komisi</h3>
+                
                 <div>
-                  <Label htmlFor="price">Harga (Rp) *</Label>
-                  <Input
-                    id="price"
-                    type="number"
-                    min="0"
-                    value={formData.price}
-                    onChange={(e) => handleInputChange('price', parseInt(e.target.value) || 0)}
-                    placeholder="100000"
-                    required
-                  />
+                  <Label htmlFor="sales">Sales Person</Label>
+                  {showAddSales ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={newSalesName}
+                        onChange={(e) => setNewSalesName(e.target.value)}
+                        placeholder="Nama sales baru"
+                        className="flex-1"
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleAddSales}
+                        size="sm"
+                      >
+                        Simpan
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowAddSales(false);
+                          setNewSalesName('');
+                        }}
+                        size="sm"
+                      >
+                        Batal
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Select
+                        value={formData.salesId}
+                        onValueChange={(value) => handleInputChange('salesId', value)}
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Pilih sales person (opsional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Tidak ada sales</SelectItem>
+                          {salesList.map((sales) => (
+                            <SelectItem key={sales.id} value={sales.id.toString()}>
+                              {sales.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowAddSales(true)}
+                        size="sm"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                {/* Removed duration input field */}
+
+                {formData.salesId && formData.salesId !== 'none' && (
+                  <>
+                    <div>
+                      <Label htmlFor="commissionType">Tipe Komisi</Label>
+                      <Select
+                        value={formData.commissionType}
+                        onValueChange={(value: 'percentage' | 'nominal') => handleInputChange('commissionType', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="percentage">Persentase (%)</SelectItem>
+                          <SelectItem value="nominal">Nominal (Rp)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="commissionValue">
+                        Nilai Komisi {formData.commissionType === 'percentage' ? '(%)' : '(Rp)'}
+                      </Label>
+                      <Input
+                        id="commissionValue"
+                        type="number"
+                        min="0"
+                        max={formData.commissionType === 'percentage' ? 100 : undefined}
+                        value={formData.commissionValue}
+                        onChange={(e) => handleInputChange('commissionValue', parseFloat(e.target.value) || 0)}
+                        placeholder={formData.commissionType === 'percentage' ? '10' : '50000'}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="flex items-center space-x-2">

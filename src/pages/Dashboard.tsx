@@ -27,7 +27,7 @@ import { useAreas } from '@/hooks/useAreas';
 import { useRouters } from '@/hooks/useRouters';
 import { usePackages } from '@/hooks/usePackages';
 import { useQuery } from '@tanstack/react-query';
-import { api, getTransactions } from '@/utils/api';
+import { api } from '@/utils/api';
 import { getCurrentJakartaTime, formatDateTimeForDisplay } from '../utils/timezone';
 
 const Dashboard = () => {
@@ -48,7 +48,7 @@ const Dashboard = () => {
   // Fetch transactions for revenue calculation
   const { data: transactionsResponse } = useQuery({
     queryKey: ['transactions'],
-    queryFn: getTransactions,
+    queryFn: api.getTransactions,
   });
 
   // Extract transactions array from API response

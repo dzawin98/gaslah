@@ -17,8 +17,35 @@ import { usePackages } from '@/hooks/usePackages';
 import { useWahaConfig } from '@/hooks/useWahaConfig';
 import { Transaction, Customer } from '@/types/isp';
 import { toast } from 'sonner';
-import { getTransactions, createTransaction, updateTransaction, deleteTransaction, updateCustomer } from '@/utils/api';
 
+
+interface TransactionBreakdown {
+  package: {
+    name: string;
+    price: number;
+    isProRata: boolean;
+    salesId?: string | number;
+    commissionType?: 'percentage' | 'nominal';
+    commissionValue?: number;
+  };
+  monthlyAddons: Array<{
+    name: string;
+    price: number;
+  }>;
+  oneTimeItems: Array<{
+    name: string;
+    price: number;
+  }>;
+  discount: number;
+  totals: {
+    package: number;
+    monthlyAddons: number;
+    oneTimeItems: number;
+    legacyAddon: number;
+    discount: number;
+    grandTotal: number;
+  };
+}
 
 interface TransactionFormData {
   customerId: string;
@@ -302,11 +329,11 @@ Tanggal: {paymentDate}
   
   const loadTransactions = async () => {
     try {
-      const response = await getTransactions();
+      const response = await api.getTransactions();
       if (response.success) {
         setTransactions(response.data);
       } else {
-        console.error('Failed to load transactions:', response.error);
+        console.error('Failed to load transactions:', response.message);
         // Fallback to empty array if API fails
         setTransactions([]);
       }
@@ -544,26 +571,57 @@ Tanggal: {paymentDate}
         newPaymentDueDate.setDate(5);
 
         // Buat transaksi baru
-        const newTransaction: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'> = {
-            customerId: customer.id,
-            customerName: customer.name,
-            amount: formData.grandTotal,
-            type: 'payment',
-            method: formData.paymentMethod.toLowerCase() === 'tunai' ? 'cash' : 'transfer',
-            description: `Pembayaran ${customer.package} - ${fromDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`,
-            receiptNumber: generateReceiptNumber(transactions),
-            status: 'paid',
-            paidAt: new Date(formData.paymentDate),
-            dueDate: newPaymentDueDate,
-            period: {
-                from: fromDate,
-                to: toDate
-            },
-            notes: formData.notes
-        };
+            // Buat breakdown untuk transaksi
+            // Cari package data lengkap berdasarkan nama package customer
+            const packageData = packages.find(pkg => pkg.name === customer.package);
 
-        // Simpan transaksi
-        const response = await createTransaction(newTransaction);
+            // Buat breakdown untuk transaksi dengan salesId
+            const transactionBreakdown: TransactionBreakdown = {
+                package: {
+                    name: customer.package || '',
+                    price: formData.packagePrice,
+                    isProRata: false,
+                    // Tambahkan salesId untuk kalkulasi komisi
+                    salesId: packageData?.salesId,
+                    commissionType: packageData?.commissionType,
+                    commissionValue: packageData?.commissionValue
+                },
+                monthlyAddons: [],
+                oneTimeItems: [],
+                discount: formData.discount,
+                totals: {
+                    package: formData.packagePrice,
+                    monthlyAddons: 0,
+                    oneTimeItems: 0,
+                    legacyAddon: formData.addonPrice,
+                    discount: formData.discount,
+                    grandTotal: formData.grandTotal
+                }
+            };
+
+            const newTransaction = {
+                customerId: customer.id!,
+                customerName: customer.name,
+                amount: formData.grandTotal,
+                type: 'payment' as const,
+                method: formData.paymentMethod.toLowerCase() as 'cash' | 'transfer' | 'digital_wallet' | 'other',
+                description: formData.description,
+                status: 'paid' as const,
+                paidAt: new Date(),
+                dueDate: new Date(formData.paymentDate),
+                receiptNumber: generateReceiptNumber(transactions),
+                period: {
+                    from: fromDate,
+                    to: toDate
+                },
+                notes: formData.notes,
+                breakdown: JSON.stringify(transactionBreakdown),
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            // Simpan transaksi
+            const response = await api.createTransaction(newTransaction);
         if (response.success) {
             // Update customer
             const updatedCustomer = {
@@ -581,7 +639,7 @@ Tanggal: {paymentDate}
                 isIsolated: false
             };
 
-            await updateCustomer(customer.id, updatedCustomer);
+            await api.updateCustomer(customer.id, updatedCustomer);
             
             // TODO: Aktifkan kembali PPP Secret di MikroTik
             // await mikrotikAPI.enablePPPSecret(customer.router, customer.pppSecret);

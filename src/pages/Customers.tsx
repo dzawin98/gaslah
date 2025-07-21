@@ -17,7 +17,7 @@ import { useAreas } from '@/hooks/useAreas';
 import { useRouters } from '@/hooks/useRouters';
 import { useODP } from '@/hooks/useODP';
 import { usePackages } from '@/hooks/usePackages';
-import { disablePPPUser, enablePPPUser, checkPPPUserStatus } from '@/utils/api';
+import { api } from '@/utils/api';
 import { toast } from 'sonner';
 
 interface WhatsAppSettings {
@@ -580,26 +580,26 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12">No</TableHead>
-                  <TableHead className="w-16">Act</TableHead>
-                  <TableHead>No.Pelanggan</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Nama</TableHead>
-                  <TableHead>Telp</TableHead>
-                  <TableHead>Area</TableHead>
-                  <TableHead>Paket</TableHead>
-                  <TableHead>Tarif</TableHead>
-                  <TableHead>Tanggal Aktif</TableHead>
-                  <TableHead>Tanggal Berakhir</TableHead>
-                  <TableHead>Periode</TableHead>
-                  <TableHead>Nama User PPP</TableHead>
-                  <TableHead className="w-32">PPP Control</TableHead>
+                  <TableHead className="w-12 whitespace-nowrap">No</TableHead>
+                  <TableHead className="w-16 whitespace-nowrap">Act</TableHead>
+                  <TableHead className="whitespace-nowrap">No.Pelanggan</TableHead>
+                  <TableHead className="whitespace-nowrap">Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Nama</TableHead>
+                  <TableHead className="whitespace-nowrap">Telp</TableHead>
+                  <TableHead className="whitespace-nowrap">Area</TableHead>
+                  <TableHead className="whitespace-nowrap">Paket</TableHead>
+                  <TableHead className="whitespace-nowrap">Tarif</TableHead>
+                  <TableHead className="whitespace-nowrap">Tanggal Aktif</TableHead>
+                  <TableHead className="whitespace-nowrap">Tanggal Berakhir</TableHead>
+                  <TableHead className="whitespace-nowrap">Periode</TableHead>
+                  <TableHead className="whitespace-nowrap">Nama User PPP</TableHead>
+                  <TableHead className="w-32 whitespace-nowrap">PPP Control</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedCustomers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={14} className="text-center py-8 text-gray-500 whitespace-nowrap">
                       Tidak ada pelanggan yang ditemukan
                     </TableCell>
                   </TableRow>
@@ -610,8 +610,8 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                     
                     return (
                       <TableRow key={customer.id}>
-                        <TableCell className="font-medium">{globalIndex}</TableCell>
-                        <TableCell>
+                        <TableCell className="font-medium whitespace-nowrap">{globalIndex}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <div className="flex gap-1">
                             <Button
                               variant="ghost"
@@ -631,8 +631,8 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                             </Button>
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono">{customer.customerNumber}</TableCell>
-                        <TableCell>
+                        <TableCell className="font-mono whitespace-nowrap">{customer.customerNumber}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                             status === 'AKTIF' ? 'bg-green-100 text-green-800' :
                             status === 'BELUM BAYAR' ? 'bg-yellow-100 text-yellow-800' :
@@ -642,11 +642,11 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                             {status}
                           </span>
                         </TableCell>
-                        <TableCell className="font-medium">{customer.name}</TableCell>
-                        <TableCell>{customer.phone}</TableCell>
-                        <TableCell>{customer.area}</TableCell>
-                        <TableCell>{customer.package}</TableCell>
-                        <TableCell>
+                        <TableCell className="font-medium whitespace-nowrap">{customer.name}</TableCell>
+                        <TableCell className="whitespace-nowrap">{customer.phone}</TableCell>
+                        <TableCell className="whitespace-nowrap">{customer.area}</TableCell>
+                        <TableCell className="whitespace-nowrap">{customer.package}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           {customer.packagePrice ? 
                             new Intl.NumberFormat('id-ID', {
                               style: 'currency',
@@ -656,21 +656,21 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                             '-'
                           }
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
                           {customer.activeDate ? 
                             new Date(customer.activeDate).toLocaleDateString('id-ID') : 
                             '-'
                           }
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
                           {customer.expireDate ? 
                             new Date(customer.expireDate).toLocaleDateString('id-ID') : 
                             '-'
                           }
                         </TableCell>
-                        <TableCell>{customer.billingType || '-'}</TableCell>
-                        <TableCell className="font-mono">{customer.pppSecret || '-'}</TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">{customer.billingType || '-'}</TableCell>
+                        <TableCell className="font-mono whitespace-nowrap">{customer.pppSecret || '-'}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <PPPUserControl customerId={customer.id} />
                         </TableCell>
                       </TableRow>

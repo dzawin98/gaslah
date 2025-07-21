@@ -84,6 +84,27 @@ module.exports = (sequelize, DataTypes) => {
         min: 0
       }
     },
+    salesId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'Sales',
+        key: 'id'
+      }
+    },
+    commissionType: {
+      type: DataTypes.ENUM('percentage', 'nominal'),
+      allowNull: false,
+      defaultValue: 'percentage'
+    },
+    commissionValue: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+      validate: {
+        min: 0
+      }
+    },
     routerName: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -101,6 +122,13 @@ module.exports = (sequelize, DataTypes) => {
       }
     }
   });
+  
+  Package.associate = function(models) {
+    Package.belongsTo(models.Sales, {
+      foreignKey: 'salesId',
+      as: 'sales'
+    });
+  };
   
   return Package;
 };
