@@ -14,23 +14,26 @@ const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [logoError, setLogoError] = useState(false);
   
-  const { login } = useAuth();
+  const { login, loading: authLoading } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    // Simulasi delay untuk loading
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const success = login(username, password);
-    
-    if (!success) {
-      setError('Username atau password salah');
+    try {
+      const result = await login(username, password);
+      
+      if (!result.success) {
+        setError(result.message || 'Login gagal. Silakan coba lagi.');
+      }
+      // If successful, the AuthContext will handle the redirect
+    } catch (error) {
+      console.error('Login error:', error);
+      setError('Terjadi kesalahan. Silakan coba lagi.');
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
   };
 
   const handleLogoError = () => {

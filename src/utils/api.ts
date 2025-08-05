@@ -1,5 +1,39 @@
 import axios from 'axios';
-import { RouterDevice, Area, ODP, Package, Customer, Transaction, MikrotikProfile, Sales, VoucherProfile, Voucher, VoucherGenerateRequest, VoucherBatch, PPPSecret } from '@/types/isp';
+import { RouterDevice, Area, ODP, Package, Customer, Transaction, MikrotikProfile, Sales, PPPSecret } from '@/types/isp';
+
+// Temporary voucher types until they are properly defined in types/isp.ts
+interface VoucherProfile {
+  id: string;
+  name: string;
+  bandwidth: string;
+  duration: number;
+  price: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface VoucherGenerateRequest {
+  profileId: string;
+  quantity: number;
+  prefix?: string;
+}
+
+interface Voucher {
+  id: string;
+  code: string;
+  profileId: string;
+  batchId: string;
+  status: 'active' | 'used' | 'expired';
+  createdAt: string;
+  usedAt?: string;
+}
+
+interface VoucherBatch {
+  id: string;
+  profileId: string;
+  quantity: number;
+  createdAt: string;
+}
 
 interface ApiResponse<T> {
   success: boolean;
@@ -30,7 +64,7 @@ const apiClient = axios.create({
 // Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('accessToken');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -84,7 +118,7 @@ const deleteRouter = async (id: string): Promise<ApiResponse<void>> => {
 
 const testRouterConnection = async (id: string): Promise<ApiResponse<{ status: string; message: string }>> => {
   try {
-    const response = await apiClient.post(`/routers/${id}/test`);
+    const response = await apiClient.post(`/routers/${id}/test-connection`);
     return response.data;
   } catch (error) {
     console.error('Error testing router connection:', error);

@@ -1,9 +1,10 @@
 {
   "development": {
-    "username": "dz",
-    "password": "dz",
+    "username": "root",
+    "password": null,
     "database": "rtrw_db",
     "host": "localhost",
+    "port": 3306,
     "dialect": "mysql"
   },
   "test": {

@@ -76,6 +76,10 @@ export const PackageForm: React.FC<PackageFormProps> = ({ pkg, isEdit = false, o
   // Load package data when editing
   useEffect(() => {
     if (isEdit && pkg) {
+      console.log('PackageForm: Loading package data for edit:', pkg);
+      console.log('PackageForm: Available routers:', routers);
+      console.log('PackageForm: Available sales:', salesList);
+      
       setFormData({
         name: pkg.name || '',
         description: pkg.description || '',
@@ -98,7 +102,7 @@ export const PackageForm: React.FC<PackageFormProps> = ({ pkg, isEdit = false, o
         }
       }
     }
-  }, [isEdit, pkg, routers]);
+  }, [isEdit, pkg, routers, salesList]);
 
   const loadPPPProfiles = async (routerId: string) => {
     try {

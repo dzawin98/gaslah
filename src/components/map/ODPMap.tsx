@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet';
 import { Icon } from 'leaflet';
 import { ODP } from '@/types/isp';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Edit, Trash2, ArrowLeft } from 'lucide-react';
+import { Edit, Trash2, ArrowLeft, Map, Satellite, Maximize, Minimize } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 // Fix for default markers in react-leaflet
@@ -51,6 +51,8 @@ export const ODPMap: React.FC<ODPMapProps> = ({
   onDelete,
   onBack
 }) => {
+  const [mapLayer, setMapLayer] = useState<'street' | 'satellite'>('street');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
@@ -76,7 +78,14 @@ export const ODPMap: React.FC<ODPMapProps> = ({
     : center;
 
   return (
-    <div className="w-full relative" style={{ height, minHeight: '400px' }}>
+    <div 
+      className={`w-full relative ${
+        isFullscreen 
+          ? 'fixed inset-0 z-50 bg-white' 
+          : ''
+      }`} 
+      style={isFullscreen ? { height: '100vh' } : { height, minHeight: '400px' }}
+    >
       {/* Header dengan tombol kembali dan info */}
       <div className="absolute top-2 left-2 right-2 z-20 flex justify-between items-center">
         <div className="bg-white rounded-lg shadow-md px-3 py-2 flex items-center gap-2">
@@ -94,11 +103,50 @@ export const ODPMap: React.FC<ODPMapProps> = ({
             {odpsWithCoordinates.length} ODP ditampilkan
           </span>
         </div>
-        <div className="bg-white rounded-lg shadow-md px-3 py-2">
-          <span className="text-xs text-gray-600">
-            Klik marker untuk detail • Drag untuk navigasi
-          </span>
-        </div>
+        <div className="flex items-center gap-2">
+            {/* Layer Toggle Button */}
+            <div className="bg-white rounded-lg shadow-md px-2 py-1 flex items-center">
+              <Button
+                variant={mapLayer === 'street' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setMapLayer('street')}
+                className="h-8 px-2 text-xs"
+              >
+                <Map className="h-3 w-3 mr-1" />
+                Peta
+              </Button>
+              <Button
+                variant={mapLayer === 'satellite' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setMapLayer('satellite')}
+                className="h-8 px-2 text-xs"
+              >
+                <Satellite className="h-3 w-3 mr-1" />
+                Satelit
+              </Button>
+            </div>
+            {/* Fullscreen Toggle Button */}
+            <div className="bg-white rounded-lg shadow-md px-2 py-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsFullscreen(!isFullscreen)}
+                className="h-8 px-2 text-xs"
+                title={isFullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'}
+              >
+                {isFullscreen ? (
+                  <Minimize className="h-3 w-3" />
+                ) : (
+                  <Maximize className="h-3 w-3" />
+                )}
+              </Button>
+            </div>
+            <div className="bg-white rounded-lg shadow-md px-3 py-2">
+              <span className="text-xs text-gray-600">
+                Klik marker untuk detail • Drag untuk navigasi
+              </span>
+            </div>
+          </div>
       </div>
       
       <MapContainer
@@ -114,8 +162,17 @@ export const ODPMap: React.FC<ODPMapProps> = ({
       >
         <>
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={
+              mapLayer === 'street' 
+                ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                : '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            }
+            url={
+              mapLayer === 'street'
+                ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            }
+            key={mapLayer}
           />
           
           {odpsWithCoordinates.map((odp) => (
@@ -158,7 +215,7 @@ export const ODPMap: React.FC<ODPMapProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Lokasi:</span>
-                      <span className="text-gray-800 font-medium">{odp.location}</span>
+                      <span className="text-gray-800 font-medium">{odp.area}</span>
                     </div>
                   </div>
                   

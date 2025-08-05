@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
         {
           model: ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         },
         {
           model: Router,
@@ -38,7 +38,7 @@ router.get('/:id', async (req, res) => {
         {
           model: ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         },
         {
           model: Router,
@@ -99,7 +99,7 @@ router.post('/', async (req, res) => {
         {
           model: ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         },
         {
           model: Router,
@@ -178,7 +178,7 @@ router.put('/:id', async (req, res) => {
         {
           model: ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         },
         {
           model: Router,

@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Eye, Edit, Trash2, Map, List } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Eye, Edit, Trash2, Map, List, Filter } from 'lucide-react';
 import { ODPForm } from '@/components/ODPForm';
 import { useODP } from '@/hooks/useODP';
+import { useAreas } from '@/hooks/useAreas';
 import { ODPMap } from '@/components/map/ODPMap';
 import { ODP } from '@/types/isp';
 import {
@@ -24,7 +26,17 @@ const ODPPage = () => {
   const [editingODP, setEditingODP] = useState<ODP | null>(null);
   const [deletingODP, setDeletingODP] = useState<ODP | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
+  const [selectedArea, setSelectedArea] = useState<string>('all');
   const { odp, loading, addODP, updateODP, deleteODP } = useODP();
+  const { areas } = useAreas();
+
+  // Filter ODP berdasarkan area yang dipilih
+  const filteredODP = useMemo(() => {
+    if (selectedArea === 'all') {
+      return odp;
+    }
+    return odp.filter(item => item.area === selectedArea);
+  }, [odp, selectedArea]);
 
   const handleAddODP = async (odpData: any) => {
     try {
@@ -102,13 +114,33 @@ const ODPPage = () => {
       </div>
 
       <div className="flex justify-between items-center">
-        <Button 
-          onClick={() => setShowForm(true)}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Tambah ODP
-        </Button>
+        <div className="flex items-center gap-4">
+          <Button 
+            onClick={() => setShowForm(true)}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Tambah ODP
+          </Button>
+          
+          {/* Filter Area */}
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-gray-500" />
+            <Select value={selectedArea} onValueChange={setSelectedArea}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Filter berdasarkan area" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Area</SelectItem>
+                {areas.map((area) => (
+                  <SelectItem key={area.id} value={area.name}>
+                    {area.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         <div className="flex gap-2">
           <Button
@@ -155,19 +187,24 @@ const ODPPage = () => {
                       Loading...
                     </TableCell>
                   </TableRow>
-                ) : odp.length === 0 ? (
+                ) : filteredODP.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={10} className="text-center py-8">
-                      Tidak ada data ODP
+                      {selectedArea === 'all' ? 'Tidak ada data ODP' : `Tidak ada ODP di area ${selectedArea}`}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  odp.map((item, index) => (
+                  filteredODP.map((item, index) => (
                     <TableRow key={item.id}>
                       <TableCell>{index + 1}</TableCell>
                       <TableCell className="font-medium">{item.name}</TableCell>
                       <TableCell>{item.area}</TableCell>
-                      <TableCell>{item.location}</TableCell>
+                      <TableCell>
+                        {item.coordinates ? 
+                          `${item.coordinates.latitude.toFixed(6)}, ${item.coordinates.longitude.toFixed(6)}` : 
+                          'Koordinat tidak tersedia'
+                        }
+                      </TableCell>
                       <TableCell>{item.totalSlots}</TableCell>
                       <TableCell>{item.usedSlots}</TableCell>
                       <TableCell>{item.availableSlots}</TableCell>
@@ -219,13 +256,13 @@ const ODPPage = () => {
                 <div className="text-center py-8">
                   Loading...
                 </div>
-              ) : odp.length === 0 ? (
+              ) : filteredODP.length === 0 ? (
                 <div className="text-center py-8">
-                  Tidak ada data ODP
+                  {selectedArea === 'all' ? 'Tidak ada data ODP' : `Tidak ada ODP di area ${selectedArea}`}
                 </div>
               ) : (
                 <ODPMap 
-                  odps={odp} 
+                  odps={filteredODP} 
                   onEdit={(odpItem) => setEditingODP(odpItem)}
                   onDelete={(odpItem) => setDeletingODP(odpItem)}
                   onBack={() => setViewMode('table')}

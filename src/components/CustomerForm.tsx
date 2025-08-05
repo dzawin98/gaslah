@@ -6,10 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
-import { CalendarIcon } from 'lucide-react';
+import { CalendarIcon, Search, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { Customer } from '@/types/isp';
 import { useAreas } from '@/hooks/useAreas';
@@ -81,6 +82,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   const [pppSecrets, setPppSecrets] = useState<string[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [pppSearchTerm, setPppSearchTerm] = useState('');
+  const [isPppDialogOpen, setIsPppDialogOpen] = useState(false);
 
   // Filter PPP secrets based on search term
   const filteredPppSecrets = pppSecrets.filter(secret => 
@@ -95,6 +97,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   // Load customer data when editing
   useEffect(() => {
     if (customer) {
+      console.log('CustomerForm: Loading customer data for edit:', customer);
+      console.log('CustomerForm: Available areas:', areas);
+      console.log('CustomerForm: Available routers:', routers);
+      console.log('CustomerForm: Available packages:', packages);
+      console.log('CustomerForm: Available ODPs:', odp);
+      
       // Convert router ID to router name for display
       let routerName = '';
       if (customer.router) {
@@ -110,7 +118,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
         paymentDueDate: customer.paymentDueDate ? customer.paymentDueDate.split('T')[0] : ''
       });
     }
-  }, [customer, routers]);
+  }, [customer, routers, areas, packages, odp]);
 
   // Set default dates for new customers
   useEffect(() => {
@@ -583,7 +591,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
                   ) : (
                     availableODPs.map((odpItem) => (
                       <SelectItem key={odpItem.id} value={odpItem.id.toString()}>
-                        {odpItem.name} - {odpItem.location} (Slot: {odpItem.availableSlots}/{odpItem.totalSlots})
+                        {odpItem.name} - {odpItem.area} (Slot: {odpItem.availableSlots}/{odpItem.totalSlots})
                       </SelectItem>
                     ))
                   )}
@@ -623,36 +631,118 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
             {formData.pppSecretType === 'existing' && (
               <div>
                 <Label htmlFor="pppSecret">PPP Secret</Label>
-                <div className="space-y-2">
+                <div className="flex gap-2">
                   <Input
                     id="pppSecret"
                     value={formData.pppSecret || ''}
-                    onChange={(e) => {
-                      handleChange('pppSecret', e.target.value);
-                      setPppSearchTerm(e.target.value);
-                    }}
-                    placeholder="Cari atau ketik nama PPP Secret..."
+                    onChange={(e) => handleChange('pppSecret', e.target.value)}
+                    placeholder="PPP Secret yang dipilih..."
+                    readOnly
+                    className="flex-1"
                   />
-                  {loadingSecrets && (
-                    <p className="text-sm text-gray-500">Loading PPP Secrets...</p>
-                  )}
-                  {filteredPppSecrets.length > 0 && (
-                    <div className="max-h-32 overflow-y-auto border rounded p-2 space-y-1">
-                      {filteredPppSecrets.map((secret, index) => (
-                        <div
-                          key={index}
-                          className="cursor-pointer hover:bg-gray-100 p-1 rounded text-sm"
-                          onClick={() => {
-                            handleChange('pppSecret', secret);
-                            setPppSearchTerm('');
-                          }}
-                        >
-                          {secret}
+                  <Dialog open={isPppDialogOpen} onOpenChange={setIsPppDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button type="button" variant="outline" size="sm">
+                        <Search className="h-4 w-4 mr-1" />
+                        Pilih
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Pilih PPP Secret</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                          <Input
+                            placeholder="Cari PPP Secret..."
+                            value={pppSearchTerm}
+                            onChange={(e) => setPppSearchTerm(e.target.value)}
+                            className="pl-10"
+                          />
+                          {pppSearchTerm && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
+                              onClick={() => setPppSearchTerm('')}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        
+                        {loadingSecrets && (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-gray-500">Loading PPP Secrets...</p>
+                          </div>
+                        )}
+                        
+                        {!loadingSecrets && filteredPppSecrets.length === 0 && pppSearchTerm && (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-gray-500">Tidak ada PPP Secret yang ditemukan</p>
+                          </div>
+                        )}
+                        
+                        {!loadingSecrets && filteredPppSecrets.length === 0 && !pppSearchTerm && pppSecrets.length === 0 && (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-gray-500">Pilih router terlebih dahulu untuk melihat PPP Secrets</p>
+                          </div>
+                        )}
+                        
+                        {filteredPppSecrets.length > 0 && (
+                          <div className="max-h-64 overflow-y-auto space-y-1">
+                            {filteredPppSecrets.map((secret, index) => (
+                              <div
+                                key={index}
+                                className="cursor-pointer hover:bg-gray-100 p-3 rounded border transition-colors"
+                                onClick={() => {
+                                  handleChange('pppSecret', secret);
+                                  setPppSearchTerm('');
+                                  setIsPppDialogOpen(false);
+                                }}
+                              >
+                                <div className="font-medium text-sm">{secret}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-end gap-2 pt-4 border-t">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setPppSearchTerm('');
+                              setIsPppDialogOpen(false);
+                            }}
+                          >
+                            Batal
+                          </Button>
+                          {formData.pppSecret && (
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              onClick={() => {
+                                handleChange('pppSecret', '');
+                                setPppSearchTerm('');
+                                setIsPppDialogOpen(false);
+                              }}
+                            >
+                              Hapus Pilihan
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
+                {formData.pppSecret && (
+                  <p className="text-sm text-green-600 mt-1">
+                    ✓ PPP Secret terpilih: {formData.pppSecret}
+                  </p>
+                )}
               </div>
             )}
           </div>

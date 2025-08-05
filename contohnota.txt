@@ -1,0 +1,239 @@
+<?php
+require('vendor/setasign/fpdf/fpdf.php');
+
+// Extend FPDF class untuk menambah fungsi MultiCell dengan border
+class PDF extends FPDF {
+    function MultiCellRow($widths, $height, $data, $border = 1, $align = 'L', $fill = false) {
+        $nb = 0;
+        for($i = 0; $i < count($data); $i++) {
+            $nb = max($nb, $this->NbLines($widths[$i], $data[$i]));
+        }
+        $h = $height * $nb;
+        
+        $x = $this->GetX();
+        $y = $this->GetY();
+        
+        for($i = 0; $i < count($data); $i++) {
+            $this->Rect($x, $y, $widths[$i], $h);
+            $x += $widths[$i];
+        }
+        
+        $x = $this->GetX();
+        for($i = 0; $i < count($data); $i++) {
+            $this->SetXY($x, $y);
+            $this->MultiCell($widths[$i], $height, $data[$i], 0, $align[$i] ?? 'L', $fill);
+            $x += $widths[$i];
+        }
+        
+        $this->SetXY($this->GetX(), $y + $h);
+    }
+    
+    function NbLines($w, $txt) {
+        $cw = &$this->CurrentFont['cw'];
+        if($w == 0) $w = $this->w - $this->rMargin - $this->x;
+        $wmax = ($w - 2 * $this->cMargin) * 1000 / $this->FontSize;
+        $s = str_replace("\r", '', $txt);
+        $nb = strlen($s);
+        if($nb > 0 && $s[$nb-1] == "\n") $nb--;
+        $sep = -1;
+        $i = 0;
+        $j = 0;
+        $l = 0;
+        $nl = 1;
+        while($i < $nb) {
+            $c = $s[$i];
+            if($c == "\n") {
+                $i++;
+                $sep = -1;
+                $j = $i;
+                $l = 0;
+                $nl++;
+                continue;
+            }
+            if($c == ' ') $sep = $i;
+            $l += $cw[$c];
+            if($l > $wmax) {
+                if($sep == -1) {
+                    if($i == $j) $i++;
+                } else $i = $sep + 1;
+                $sep = -1;
+                $j = $i;
+                $l = 0;
+                $nl++;
+            } else $i++;
+        }
+        return $nl;
+    }
+}
+
+// Tambahkan header no-cache
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Cache-Control: post-check=0, pre-check=0', false);
+header('Pragma: no-cache');
+
+// Koneksi database
+try {
+    $conn = new mysqli('10.10.10.10', 'dz', 'dz', 'rtrw_db');
+    if ($conn->connect_error) {
+        throw new Exception('Koneksi database gagal: ' . $conn->connect_error);
+    }
+} catch (Exception $e) {
+    die($e->getMessage());
+}
+
+// Validasi input
+$receiptNumber = $_GET['receiptNumber'] ?? '';
+if (empty($receiptNumber)) {
+    die('Nomor nota tidak ditemukan');
+}
+
+// Query untuk mengambil data transaksi
+try {
+    $sql = "SELECT 
+        t.receiptNumber,
+        t.customerName,
+        t.amount,
+        t.paidAt,
+        t.periodFrom,
+        t.periodTo,
+        c.customerNumber,
+        c.phone,
+        c.address,
+        c.package AS package_name,
+        c.packagePrice AS price,
+        DATE_FORMAT(t.paidAt, '%d-%m-%Y %H:%i:%s') as formatted_paid_at,
+        DATE_FORMAT(t.periodFrom, '%d %M %Y') as formatted_period_from,
+        DATE_FORMAT(t.periodTo, '%d %M %Y') as formatted_period_to
+    FROM Transactions t 
+    JOIN customers c ON t.customerId = c.id 
+    WHERE t.receiptNumber = ? 
+    LIMIT 1";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        throw new Exception('Prepare statement gagal: ' . $conn->error);
+    }
+
+    $stmt->bind_param('s', $receiptNumber);
+    if (!$stmt->execute()) {
+        throw new Exception('Execute statement gagal: ' . $stmt->error);
+    }
+
+    $result = $stmt->get_result();
+    if (!$result || $result->num_rows === 0) {
+        throw new Exception('Data tidak ditemukan');
+    }
+
+    $data = $result->fetch_assoc();
+    $stmt->close();
+} catch (Exception $e) {
+    die($e->getMessage());
+}
+
+// Buat PDF
+$pdf = new PDF('P', 'mm', 'A4');
+$pdf->AddPage();
+$pdf->SetAutoPageBreak(false);
+
+// Header
+$pdf->Image('logo.png', 10, 10, 25);
+$pdf->SetFont('Arial', 'B', 14);
+$pdf->SetXY(40, 12);
+$pdf->Cell(0, 6, 'LATANSA NETWORKS', 0, 1);
+$pdf->SetFont('Arial', '', 9);
+$pdf->SetXY(40, 18);
+$pdf->Cell(0, 5, 'Terkoneksi Tanpa Batas, Menghadirkan Dunia Diujung Jari', 0, 1);
+$pdf->SetXY(40, 23);
+$pdf->Cell(0, 5, 'Berkat Usaha, Seberang Pebenaan, Keritang', 0, 1);
+$pdf->SetXY(40, 28);
+$pdf->Cell(0, 5, 'Indragiri Hilir, Telp 085256372504', 0, 1);
+$pdf->SetXY(40, 33);
+$pdf->SetTextColor(255, 0, 0);
+$pdf->Cell(0, 5, 'support@latansa.my.id', 0, 1);
+$pdf->SetTextColor(0, 0, 0);
+
+// Info Invoice
+$pdf->SetFont('Arial', 'B', 16);
+$pdf->SetXY(130, 20);
+$pdf->Cell(0, 8, 'Invoice #' . $data['receiptNumber'], 0, 1, 'R');
+$pdf->SetFont('Arial', '', 10);
+$pdf->SetXY(130, 28);
+$pdf->Cell(0, 6, 'Tanggal Bayar: ' . $data['formatted_paid_at'], 0, 1, 'R');
+$pdf->SetXY(130, 34);
+$pdf->Cell(0, 6, 'Nomor Pelanggan: ' . $data['customerNumber'], 0, 1, 'R');
+
+// Kepada & Periode
+$pdf->SetY(50);
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(95, 6, 'Kepada,', 0, 0);
+$pdf->Cell(95, 6, 'PERIODE', 0, 1, 'C');
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(95, 6, strtoupper($data['customerName']), 0, 0);
+$pdf->Cell(95, 8, strtoupper(date('F Y', strtotime($data['periodFrom']))), 0, 1, 'C');
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(95, 6, 'Telp: ' . $data['phone'], 0, 0);
+$pdf->Cell(95, 6, '', 0, 1);
+$pdf->SetFont('Arial', 'B', 18);
+$pdf->SetY($pdf->GetY() - 2);
+$pdf->Cell(95, 12, '', 0, 0);
+$pdf->Cell(95, 12, 'L U N A S', 0, 1, 'C');
+$pdf->Ln(10);
+
+// Tabel Detail
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->SetFillColor(240, 240, 240);
+
+// Header tabel
+$pdf->Cell(15, 10, 'No', 1, 0, 'C', true);
+$pdf->Cell(65, 10, 'Deskripsi', 1, 0, 'C', true);
+$pdf->Cell(30, 10, 'Tarif', 1, 0, 'C', true);
+$pdf->Cell(50, 10, 'Pemakaian', 1, 0, 'C', true);
+$pdf->Cell(30, 10, 'Total', 1, 1, 'C', true);
+
+// Data tabel
+$pdf->SetFont('Arial', '', 9);
+$widths = [15, 65, 30, 50, 30];
+$periode_text = $data['formatted_period_from'] . ' - ' . $data['formatted_period_to'];
+
+$pdf->MultiCellRow(
+    $widths,
+    5,
+    [
+        '1',
+        $data['package_name'],
+        'Rp ' . number_format($data['price'], 0, ',', '.'),
+        $periode_text,
+        'Rp ' . number_format($data['amount'], 0, ',', '.')
+    ],
+    1,
+    ['C', 'L', 'R', 'C', 'R']
+);
+
+// Grand Total
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(160, 10, 'Grand Total', 1, 0, 'R');
+$pdf->Cell(30, 10, 'Rp ' . number_format($data['amount'], 0, ',', '.'), 1, 1, 'R');
+$pdf->Ln(5);
+
+// Footer
+$pdf->SetFont('Arial', '', 10);
+$pdf->Cell(0, 6, 'Keterangan', 0, 1);
+$pdf->Ln(5);
+$pdf->Cell(95, 6, 'Penyetor,', 0, 0, 'C');
+$pdf->Cell(95, 6, 'Penerima,', 0, 1, 'C');
+$pdf->Ln(15);
+$pdf->Cell(95, 6, '( ' . strtoupper($data['customerName']) . ' )', 0, 0, 'C');
+$pdf->Cell(95, 6, '( Darwis Asyur )', 0, 1, 'C');
+$pdf->Ln(8);
+
+// Info Pembayaran
+$pdf->SetFont('Arial', '', 8);
+$pdf->Cell(95, 4, 'Rekening pembayaran transfer Bank :', 0, 1);
+$pdf->SetFont('Arial', 'B', 8);
+$pdf->Cell(95, 4, 'BRI: 557501007609530 an DARWIS ASYUR', 0, 1);
+$pdf->Cell(95, 4, 'BNI 46: 0285411186 an DARWIS ASYUR', 0, 1);
+
+// Output PDF
+header('Content-Type: application/pdf');
+$pdf->Output('I', 'Nota-' . $data['receiptNumber'] . '.pdf');
+?>

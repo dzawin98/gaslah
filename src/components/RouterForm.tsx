@@ -31,6 +31,8 @@ export const RouterForm = ({ onClose, onSubmit, router, isEdit = false }: Router
   // Load router data when editing
   useEffect(() => {
     if (isEdit && router) {
+      console.log('RouterForm: Loading router data for edit:', router);
+      
       setFormData({
         name: router.name || '',
         ipAddress: router.ipAddress || '',

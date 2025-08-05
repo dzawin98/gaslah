@@ -18,6 +18,8 @@ import NotFound from "./pages/NotFound";
 import ODP from "./pages/ODP";
 import Receipt from '@/pages/Receipt';
 import Reports from "./pages/Reports";
+import CommissionReports from "./pages/CommissionReports";
+import CustomReceipt from "./pages/CustomReceipt";
 // Remove this import
 
 const queryClient = new QueryClient();
@@ -36,6 +38,8 @@ const App = () => (
                 <Route path="/customers" element={<Customers />} />
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/reports" element={<Reports />} />
+                <Route path="/commission-reports" element={<CommissionReports />} />
+                <Route path="/custom-receipt" element={<CustomReceipt />} />
                 <Route path="/routers" element={<Routers />} />
                 <Route path="/areas" element={<Areas />} />
                 <Route path="/odp" element={<ODP />} />

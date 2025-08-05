@@ -9,7 +9,7 @@ import { ArrowLeft } from 'lucide-react';
 import { MapPicker } from '@/components/map/MapPicker';
 import { toast } from 'sonner';
 import { ODP } from '@/types/isp';
-import { useRouters } from '@/hooks/useRouters';
+import { useAreas } from '@/hooks/useAreas';
 
 interface ODPFormProps {
   onClose: () => void;
@@ -21,8 +21,7 @@ interface ODPFormProps {
 export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps) => {
   const [formData, setFormData] = useState({
     name: '',
-    location: '',
-    router: '', // Gunakan router sebagai field utama
+    area: '', // Gunakan area sebagai field utama
     totalSlots: 8,
     usedSlots: 0,
     latitude: '',
@@ -30,15 +29,16 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
     status: 'active' as 'active' | 'maintenance' | 'inactive'
   });
 
-  const { routers, loading: routersLoading } = useRouters();
+  const { areas, loading: areasLoading } = useAreas();
 
   // Load ODP data when editing
   useEffect(() => {
     if (isEdit && odp) {
+      console.log('Loading ODP data for edit:', odp);
+      console.log('Available areas:', areas);
       setFormData({
         name: odp.name || '',
-        location: odp.location || '',
-        router: odp.area || '', // Load area sebagai router untuk data existing
+        area: odp.area || '', // Load area untuk data existing
         totalSlots: odp.totalSlots || 8,
         usedSlots: odp.usedSlots || 0,
         latitude: odp.coordinates?.latitude?.toString() || '',
@@ -46,7 +46,7 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
         status: odp.status || 'active'
       });
     }
-  }, [isEdit, odp]);
+  }, [isEdit, odp, areas]); // Tambahkan areas sebagai dependency
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({
@@ -63,13 +63,8 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
       return;
     }
 
-    if (!formData.router) {
-      toast.error('Router harus dipilih');
-      return;
-    }
-
-    if (!formData.location.trim()) {
-      toast.error('Lokasi harus diisi');
+    if (!formData.area) {
+      toast.error('Wilayah harus dipilih');
       return;
     }
 
@@ -85,8 +80,7 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
 
     const odpData = {
       name: formData.name,
-      location: formData.location,
-      area: formData.router, // Simpan router sebagai area untuk kompatibilitas
+      area: formData.area, // Simpan area yang dipilih
       totalSlots: formData.totalSlots,
       usedSlots: formData.usedSlots,
       availableSlots: formData.totalSlots - formData.usedSlots,
@@ -140,36 +134,25 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
               </div>
 
               <div>
-                <Label htmlFor="router">Router *</Label>
-                <Select value={formData.router} onValueChange={(value) => handleInputChange('router', value)}>
+                <Label htmlFor="area">Wilayah *</Label>
+                <Select value={formData.area} onValueChange={(value) => handleInputChange('area', value)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih Router" />
+                    <SelectValue placeholder="Pilih Wilayah" />
                   </SelectTrigger>
                   <SelectContent>
-                    {routersLoading ? (
-                      <SelectItem value="loading" disabled>Loading routers...</SelectItem>
-                    ) : routers.length === 0 ? (
-                      <SelectItem value="no-routers" disabled>Tidak ada router tersedia</SelectItem>
+                    {areasLoading ? (
+                      <SelectItem value="loading" disabled>Loading wilayah...</SelectItem>
+                    ) : areas.length === 0 ? (
+                      <SelectItem value="no-areas" disabled>Tidak ada wilayah tersedia</SelectItem>
                     ) : (
-                      routers.map(router => (
-                        <SelectItem key={router.id} value={router.name}>
-                          {router.name} ({router.ipAddress})
+                      areas.map(area => (
+                        <SelectItem key={area.id} value={area.name}>
+                          {area.name}
                         </SelectItem>
                       ))
                     )}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div>
-                <Label htmlFor="location">Lokasi *</Label>
-                <Input
-                  id="location"
-                  value={formData.location}
-                  onChange={(e) => handleInputChange('location', e.target.value)}
-                  placeholder="Masukkan lokasi ODP"
-                  required
-                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">

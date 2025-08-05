@@ -985,7 +985,7 @@ const Messages = () => {
                     <SelectItem value="all">Semua ODP</SelectItem>
                     {odps?.map((odp) => (
                       <SelectItem key={odp.id} value={odp.name}>
-                        {odp.name} - {odp.location}
+                        {odp.name} - {odp.area}
                       </SelectItem>
                     ))}
                   </SelectContent>
