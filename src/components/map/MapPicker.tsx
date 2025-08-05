@@ -4,7 +4,7 @@ import { Icon, LatLng } from 'leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { MapPin, Navigation, Search } from 'lucide-react';
+import { MapPin, Navigation, Search, Map, Satellite, Maximize, Minimize } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 // Fix for default markers
@@ -41,6 +41,8 @@ export const MapPicker: React.FC<MapPickerProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [mapLayer, setMapLayer] = useState<'street' | 'satellite'>('street');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Default center (Batam)
   const defaultCenter: [number, number] = [-0.698042, 103.017558];
@@ -114,7 +116,11 @@ export const MapPicker: React.FC<MapPickerProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${
+      isFullscreen 
+        ? 'fixed inset-0 z-50 bg-white p-4 overflow-auto' 
+        : ''
+    }`}>
       {/* Search and Controls */}
       <div className="space-y-3">
         <div className="flex gap-2">
@@ -145,6 +151,49 @@ export const MapPicker: React.FC<MapPickerProps> = ({
             <Navigation className="h-4 w-4" />
           </Button>
         </div>
+        
+        {/* Layer Toggle */}
+         <div className="flex items-center gap-2">
+           <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-lg">
+             <Button
+               type="button"
+               variant={mapLayer === 'street' ? 'default' : 'ghost'}
+               size="sm"
+               onClick={() => setMapLayer('street')}
+               className="h-8 px-2 text-xs"
+             >
+               <Map className="h-3 w-3 mr-1" />
+               Peta
+             </Button>
+             <Button
+               type="button"
+               variant={mapLayer === 'satellite' ? 'default' : 'ghost'}
+               size="sm"
+               onClick={() => setMapLayer('satellite')}
+               className="h-8 px-2 text-xs"
+             >
+               <Satellite className="h-3 w-3 mr-1" />
+               Satelit
+             </Button>
+           </div>
+           {/* Fullscreen Toggle */}
+           <div className="bg-gray-50 p-1 rounded-lg">
+             <Button
+               type="button"
+               variant="ghost"
+               size="sm"
+               onClick={() => setIsFullscreen(!isFullscreen)}
+               className="h-8 px-2 text-xs"
+               title={isFullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'}
+             >
+               {isFullscreen ? (
+                 <Minimize className="h-3 w-3" />
+               ) : (
+                 <Maximize className="h-3 w-3" />
+               )}
+             </Button>
+           </div>
+         </div>
 
         {/* Manual coordinate input */}
         <div className="grid grid-cols-2 gap-4">
@@ -174,7 +223,10 @@ export const MapPicker: React.FC<MapPickerProps> = ({
       </div>
 
       {/* Map */}
-      <div className="relative" style={{ height }}>
+      <div 
+        className="relative" 
+        style={isFullscreen ? { height: 'calc(100vh - 200px)' } : { height }}
+      >
         <MapContainer
           center={mapCenter}
           zoom={13}
@@ -183,8 +235,17 @@ export const MapPicker: React.FC<MapPickerProps> = ({
         >
           <>
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution={
+                mapLayer === 'street' 
+                  ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  : '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+              }
+              url={
+                mapLayer === 'street'
+                  ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              }
+              key={mapLayer}
             />
             
             <MapClickHandler onLocationSelect={handleLocationSelect} />

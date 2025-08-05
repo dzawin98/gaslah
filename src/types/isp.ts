@@ -121,7 +121,6 @@ export interface Package {
 export interface ODP {
   id: string;
   name: string;
-  location: string;
   area: string;
   totalSlots: number;
   usedSlots: number;

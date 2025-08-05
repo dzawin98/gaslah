@@ -14,6 +14,8 @@ import {
   Menu,
   X,
   TrendingUp,
+  DollarSign,
+  FileText,
   // Hapus import Ticket
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -35,12 +37,18 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { name: 'Pelanggan', href: '/customers', icon: Users },
     { name: 'Pesan', href: '/messages', icon: MessageSquare },
     { name: 'Transaksi', href: '/transactions', icon: CreditCard },
+    { name: 'Nota Lainnya', href: '/custom-receipt', icon: FileText },
     // Hapus baris voucher navigation
     { name: 'Laporan', href: '/reports', icon: TrendingUp },
+    { name: 'Laporan Komisi', href: '/commission-reports', icon: DollarSign },
   ];
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   const handleLogoError = () => {
@@ -100,8 +108,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                   <User className="h-4 w-4 text-white" />
                 </div>
                 <div className="text-sm">
-                  <p className="font-medium">{user?.username || 'Admin'}</p>
-                  <p className="text-gray-500">ADMIN</p>
+                  <p className="font-medium">{user?.fullName || user?.username || 'User'}</p>
+                  <p className="text-gray-500">{user?.role?.toUpperCase() || 'USER'}</p>
                 </div>
               </div>
             </div>

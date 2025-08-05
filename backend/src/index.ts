@@ -1,5 +1,7 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 const db = require('../models');
 const { Sales } = require('../models');
 
@@ -33,7 +35,26 @@ app.use(cors({
   ],
   credentials: true
 }));
-app.use(express.json());
+
+// Security middleware
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false
+}));
+app.use(cookieParser());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Import auth routes
+const authRoutes = require('../routes/auth');
+const userRoutes = require('../routes/users');
+const { authenticateToken, requireRole } = require('../middleware/auth');
+
+// Auth routes (public)
+app.use('/api/auth', authRoutes);
+
+// User management routes (admin only)
+app.use('/api/users', userRoutes);
 
 // Test Database Connection
 const testDbConnection = async () => {
@@ -45,6 +66,20 @@ const testDbConnection = async () => {
   }
 };
 testDbConnection();
+
+// Protected routes - require authentication
+app.use('/api/areas', authenticateToken);
+app.use('/api/routers', authenticateToken);
+app.use('/api/odps', authenticateToken);
+app.use('/api/packages', authenticateToken);
+app.use('/api/customers', authenticateToken);
+app.use('/api/settings', authenticateToken);
+app.use('/api/sales', authenticateToken);
+app.use('/api/transactions', authenticateToken);
+app.use('/api/billing', authenticateToken);
+app.use('/api/dashboard', authenticateToken);
+app.use('/api/mikrotik', authenticateToken);
+app.use('/api/debug', authenticateToken);
 
 // Area CRUD Endpoints
 
@@ -663,7 +698,7 @@ app.get('/api/odps', async (req: Request, res: Response) => {
 // Create a new ODP
 app.post('/api/odps', async (req: Request, res: Response) => {
   try {
-    const { name, location, area, totalSlots, usedSlots, latitude, longitude, status } = req.body;
+    const { name, area, totalSlots, usedSlots, latitude, longitude, status } = req.body;
     
     // Validasi input
     if (!name || !name.trim()) {
@@ -674,11 +709,11 @@ app.post('/api/odps', async (req: Request, res: Response) => {
       });
     }
     
-    if (!location || !location.trim()) {
+    if (!area || !area.trim()) {
       return res.status(400).json({
         success: false,
         data: null,
-        message: 'Lokasi ODP harus diisi'
+        message: 'Area ODP harus diisi'
       });
     }
     
@@ -705,8 +740,7 @@ app.post('/api/odps', async (req: Request, res: Response) => {
     
     const odp = await db.ODP.create({
       name: name.trim(),
-      location: location.trim(),
-      area: area || '',
+      area: area.trim(),
       totalSlots: finalTotalSlots,
       usedSlots: finalUsedSlots,
       latitude,
@@ -780,7 +814,7 @@ app.get('/api/odps/:id', async (req: Request, res: Response) => {
 app.put('/api/odps/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, location, area, totalSlots, usedSlots, latitude, longitude, status } = req.body;
+    const { name, area, totalSlots, usedSlots, latitude, longitude, status } = req.body;
     
     const odp = await db.ODP.findByPk(id);
     if (!odp) {
@@ -830,7 +864,6 @@ app.put('/api/odps/:id', async (req: Request, res: Response) => {
     
     await odp.update({
       name: name ? name.trim() : odp.name,
-      location: location ? location.trim() : odp.location,
       area: area !== undefined ? area : odp.area,
       totalSlots: finalTotalSlots,
       usedSlots: finalUsedSlots,
@@ -1313,7 +1346,7 @@ app.get('/api/customers', async (req: Request, res: Response) => {
         {
           model: db.ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots'],
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots'],
           required: false // LEFT JOIN instead of INNER JOIN
         }
       ],
@@ -1448,7 +1481,7 @@ app.post('/api/customers', async (req: Request, res: Response) => {
         {
           model: db.ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         }
       ],
       transaction
@@ -1550,7 +1583,7 @@ app.put('/api/customers/:id', async (req: Request, res: Response) => {
         {
           model: db.ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         }
       ],
       transaction
@@ -1588,7 +1621,7 @@ app.get('/api/customers/:id', async (req: Request, res: Response) => {
         {
           model: db.ODP,
           as: 'odpData',
-          attributes: ['id', 'name', 'location', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
+          attributes: ['id', 'name', 'area', 'totalSlots', 'usedSlots', 'availableSlots']
         }
       ]
     });
