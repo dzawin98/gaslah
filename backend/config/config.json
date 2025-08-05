@@ -8,15 +8,15 @@
     "dialect": "mysql"
   },
   "test": {
-      "username": "dz",
-    "password": "dz",
+    "username": "root",
+    "password": null,
     "database": "rtrw_db",
     "host": "localhost",
     "dialect": "mysql"
   },
   "production": {
-      "username": "dz",
-    "password": "dz",
+    "username": "root",
+    "password": null,
     "database": "rtrw_db",
     "host": "localhost",
     "dialect": "mysql"

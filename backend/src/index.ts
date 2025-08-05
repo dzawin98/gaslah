@@ -26,14 +26,15 @@ const port = process.env.PORT || 3001;
 
 app.use(cors({
   origin: [
-    'http://10.10.10.26:3000',
     'https://billing.latansa.my.id',
+    'http://billing.latansa.my.id',
     'http://localhost:8080',
     'http://localhost:3001',
     'https://api.latansa.my.id'
-  
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Security middleware

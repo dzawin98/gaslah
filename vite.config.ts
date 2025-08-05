@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
     host: "::",
     historyApiFallback: true,
+    allowedHosts: ["billing.latansa.my.id"],
   },
   plugins: [
     react(),

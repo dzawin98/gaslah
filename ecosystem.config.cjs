@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'rtrw-backend',
       script: './backend/dist/index.js',
-      cwd: '/opt/rtrw',
+      cwd: 'C:/gaslah',  // Sesuaikan dengan path project Anda
       instances: 1,
       autorestart: true,
       watch: false,
@@ -15,13 +15,17 @@ module.exports = {
     },
     {
       name: 'rtrw-frontend',
-      script: 'http-server',
-      args: 'dist -p 3000 -a 0.0.0.0',
-      cwd: '/opt/rtrw',
+      script: 'npx',
+      args: 'http-server C:/gaslah/dist -p 8080 --cors --no-dotfiles',
+      cwd: 'C:/gaslah',
       instances: 1,
       autorestart: true,
       watch: false,
       max_memory_restart: '512M',
+      max_restarts: 5,
+      min_uptime: '10s',
+      restart_delay: 4000,
+      kill_timeout: 3000,
       env: {
         NODE_ENV: 'production'
       }

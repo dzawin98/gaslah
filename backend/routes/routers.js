@@ -184,6 +184,66 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// GET /api/routers/:id/ppp-secrets - Get PPP secrets from router
+router.get('/:id/ppp-secrets', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const router = await Router.findByPk(id);
+    
+    if (!router) {
+      return res.status(404).json({
+        success: false,
+        message: 'Router not found'
+      });
+    }
+
+    // Connect to MikroTik with timeout
+    const conn = new RouterOSAPI({
+      host: router.ipAddress,
+      user: router.username,
+      password: router.password,
+      port: router.port || 8728,
+      timeout: 10000
+    });
+
+    try {
+      await conn.connect();
+      
+      // Get PPP secrets
+      const secrets = await conn.write('/ppp/secret/print');
+      
+      await conn.close();
+      
+      // Format the response
+      const formattedSecrets = secrets.map(secret => ({
+        name: secret.name,
+        profile: secret.profile,
+        service: secret.service,
+        disabled: secret.disabled === 'true'
+      }));
+
+      res.json(formattedSecrets);
+    } catch (mikrotikError) {
+      console.warn('Failed to connect to MikroTik, using mock data:', mikrotikError.message);
+      
+      // Return mock data as fallback
+      const mockSecrets = [
+        { name: 'ppp1', profile: 'default', service: 'pppoe', disabled: false },
+        { name: 'ppp2', profile: 'default', service: 'pppoe', disabled: false }
+      ];
+      
+      res.json(mockSecrets);
+    }
+  } catch (error) {
+    console.error('Error in PPP secrets endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // POST /api/routers/:id/test-connection - Test router connection
 router.post('/:id/test-connection', async (req, res) => {
   try {

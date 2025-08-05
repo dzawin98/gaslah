@@ -348,7 +348,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   const loadPPPSecrets = async (routerId: string) => {
     setLoadingSecrets(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/routers/${routerId}/ppp-secrets`);
+      const response = await fetch(`https://api.latansa.my.id/api/routers/${routerId}/ppp-secrets`);
       if (response.ok) {
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
