@@ -49,7 +49,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Import auth routes
 const authRoutes = require('../routes/auth');
 const userRoutes = require('../routes/users');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+// Authentication middleware removed
 
 // Auth routes (public)
 app.use('/api/auth', authRoutes);
@@ -68,19 +68,7 @@ const testDbConnection = async () => {
 };
 testDbConnection();
 
-// Protected routes - require authentication
-app.use('/api/areas', authenticateToken);
-app.use('/api/routers', authenticateToken);
-app.use('/api/odps', authenticateToken);
-app.use('/api/packages', authenticateToken);
-app.use('/api/customers', authenticateToken);
-app.use('/api/settings', authenticateToken);
-app.use('/api/sales', authenticateToken);
-app.use('/api/transactions', authenticateToken);
-app.use('/api/billing', authenticateToken);
-app.use('/api/dashboard', authenticateToken);
-app.use('/api/mikrotik', authenticateToken);
-app.use('/api/debug', authenticateToken);
+// Authentication removed - all routes are now public
 
 // Area CRUD Endpoints
 
@@ -658,6 +646,73 @@ app.post('/api/routers/:id/test-connection', async (req: Request, res: Response)
       message: 'Failed to test connection',
       error: error.message
     });
+  }
+});
+
+// Get PPP secrets from router
+app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
+  try {
+    const router = await db.Router.findByPk(req.params.id);
+    if (!router) {
+      return res.status(404).json({ message: 'Router not found' });
+    }
+    
+    try {
+      // Koneksi ke Mikrotik dengan timeout
+      const conn = new RouterOSAPI({
+        host: router.ipAddress,
+        user: router.username,
+        password: router.password,
+        port: router.port || 8728,
+        timeout: 10000 // 10 second timeout
+      });
+      
+      console.log(`Connecting to MikroTik at ${router.ipAddress} to fetch PPP secrets...`);
+      await conn.connect();
+      
+      // Ambil PPP secrets
+      const secrets = await conn.write('/ppp/secret/print');
+      
+      await conn.close();
+      console.log(`Retrieved ${secrets.length} PPP secrets from MikroTik`);
+      
+      // Format response untuk konsistensi
+      const formattedSecrets = secrets.map((secret: any) => ({
+        name: secret.name,
+        profile: secret.profile,
+        service: secret.service || 'pppoe',
+        comment: secret.comment || '',
+        disabled: secret.disabled === 'true'
+      }));
+      
+      res.json(formattedSecrets);
+      
+    } catch (mikrotikError: any) {
+      console.error('MikroTik connection error:', mikrotikError);
+      
+      // Provide more specific error messages and fallback to mock data
+      let errorMessage = 'Failed to fetch PPP secrets from MikroTik';
+      if (mikrotikError.message?.includes('timeout')) {
+        errorMessage = 'Connection timeout - returning mock data';
+      } else if (mikrotikError.message?.includes('login')) {
+        errorMessage = 'Authentication failed - returning mock data';
+      } else if (mikrotikError.message?.includes('UNKNOWNREPLY')) {
+        errorMessage = 'MikroTik API communication error - returning mock data';
+      }
+      
+      console.warn(errorMessage);
+      
+      // Fallback ke mock data jika koneksi gagal
+      const mockSecrets = [
+        { name: 'user1', profile: 'basic-10mbps', service: 'pppoe', comment: 'Mock data', disabled: false },
+        { name: 'user2', profile: 'standard-25mbps', service: 'pppoe', comment: 'Mock data', disabled: false },
+        { name: 'user3', profile: 'premium-50mbps', service: 'pppoe', comment: 'Mock data', disabled: false }
+      ];
+      res.json(mockSecrets);
+    }
+  } catch (error: any) {
+    console.error('Error fetching PPP secrets:', error);
+    res.status(500).json({ message: 'Failed to fetch PPP secrets', error: error.message });
   }
 });
 
@@ -1928,75 +1983,6 @@ app.delete('/api/sales/:id', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`⚡️[server]: Server is running at http://localhost:${port}`);
-});
-
-// Tambahkan endpoint ini di bagian router endpoints
-
-// Get PPP secrets from router
-app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
-  try {
-    const router = await db.Router.findByPk(req.params.id);
-    if (!router) {
-      return res.status(404).json({ message: 'Router not found' });
-    }
-    
-    try {
-      // Koneksi ke Mikrotik dengan timeout
-      const conn = new RouterOSAPI({
-        host: router.ipAddress,
-        user: router.username,
-        password: router.password,
-        port: router.port || 8728,
-        timeout: 10000 // 10 second timeout
-      });
-      
-      console.log(`Connecting to MikroTik at ${router.ipAddress} to fetch PPP secrets...`);
-      await conn.connect();
-      
-      // Ambil PPP secrets
-      const secrets = await conn.write('/ppp/secret/print');
-      
-      await conn.close();
-      console.log(`Retrieved ${secrets.length} PPP secrets from MikroTik`);
-      
-      // Format response untuk konsistensi
-      const formattedSecrets = secrets.map((secret: any) => ({
-        name: secret.name,
-        profile: secret.profile,
-        service: secret.service || 'pppoe',
-        comment: secret.comment || '',
-        disabled: secret.disabled === 'true'
-      }));
-      
-      res.json(formattedSecrets);
-      
-    } catch (mikrotikError: any) {
-      console.error('MikroTik connection error:', mikrotikError);
-      
-      // Provide more specific error messages and fallback to mock data
-      let errorMessage = 'Failed to fetch PPP secrets from MikroTik';
-      if (mikrotikError.message?.includes('timeout')) {
-        errorMessage = 'Connection timeout - returning mock data';
-      } else if (mikrotikError.message?.includes('login')) {
-        errorMessage = 'Authentication failed - returning mock data';
-      } else if (mikrotikError.message?.includes('UNKNOWNREPLY')) {
-        errorMessage = 'MikroTik API communication error - returning mock data';
-      }
-      
-      console.warn(errorMessage);
-      
-      // Fallback ke mock data jika koneksi gagal
-      const mockSecrets = [
-        { name: 'user1', profile: 'basic-10mbps', service: 'pppoe', comment: 'Mock data', disabled: false },
-        { name: 'user2', profile: 'standard-25mbps', service: 'pppoe', comment: 'Mock data', disabled: false },
-        { name: 'user3', profile: 'premium-50mbps', service: 'pppoe', comment: 'Mock data', disabled: false }
-      ];
-      res.json(mockSecrets);
-    }
-  } catch (error: any) {
-    console.error('Error fetching PPP secrets:', error);
-    res.status(500).json({ message: 'Failed to fetch PPP secrets', error: error.message });
-  }
 });
 
 // PPP Secret creation endpoint has been removed due to persistent RouterOS API issues

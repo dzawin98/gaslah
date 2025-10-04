@@ -106,31 +106,64 @@ const CustomReceipt = () => {
 
     try {
       setIsGenerating(true);
+      
+      // Simpan style asli
+      const originalStyle = receiptRef.current.style.cssText;
+      
+      // Atur ukuran konten ke ukuran A4 untuk rendering
+      // Ukuran A4 dalam mm: 210mm x 297mm
+      // Konversi ke piksel dengan asumsi 96 DPI: ~793px x ~1123px
+      receiptRef.current.style.width = '793px';
+      receiptRef.current.style.minHeight = '1123px';
+      receiptRef.current.style.maxHeight = 'none';
+      receiptRef.current.style.margin = '0';
+      receiptRef.current.style.padding = '30px';
+      receiptRef.current.style.boxSizing = 'border-box';
+      
+      // Render dengan ukuran A4
       const canvas = await html2canvas(receiptRef.current, {
-        scale: 2,
+        scale: 2, // Kualitas tinggi
         useCORS: true,
-        allowTaint: true
+        allowTaint: true,
+        logging: false,
+        windowWidth: 793,
+        windowHeight: 1123
       });
       
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const pageHeight = 295;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
+      // Kembalikan style asli
+      receiptRef.current.style.cssText = originalStyle;
       
+      // Buat PDF dengan ukuran A4 standar
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // Ukuran A4 dalam mm
+      const pdfWidth = 210;
+      const pdfHeight = 297;
+      
+      // Konversi canvas ke gambar
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Hitung rasio untuk memastikan gambar sesuai dengan ukuran A4
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      // Tambahkan gambar ke PDF dengan ukuran yang tepat
+      let heightLeft = imgHeight;
       let position = 0;
       
+      // Halaman pertama
       pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+      heightLeft -= pdfHeight;
       
+      // Tambahkan halaman tambahan jika konten terlalu panjang
       while (heightLeft >= 0) {
         position = heightLeft - imgHeight;
         pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+        heightLeft -= pdfHeight;
       }
       
+      // Simpan PDF
       pdf.save(`Nota-${receiptNumber}.pdf`);
       
       toast({
@@ -164,19 +197,56 @@ const CustomReceipt = () => {
     try {
       if (!receiptRef.current) return;
 
+      // Simpan style asli
+      const originalStyle = receiptRef.current.style.cssText;
+      
+      // Atur ukuran konten ke ukuran A4 untuk rendering
+      receiptRef.current.style.width = '793px';
+      receiptRef.current.style.minHeight = '1123px';
+      receiptRef.current.style.maxHeight = 'none';
+      receiptRef.current.style.margin = '0';
+      receiptRef.current.style.padding = '30px';
+      receiptRef.current.style.boxSizing = 'border-box';
+
       const canvas = await html2canvas(receiptRef.current, {
         scale: 2,
         useCORS: true,
-        allowTaint: true
+        allowTaint: true,
+        logging: false,
+        windowWidth: 793,
+        windowHeight: 1123
       });
+      
+      // Kembalikan style asli
+      receiptRef.current.style.cssText = originalStyle;
       
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const pageHeight = 295;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
       
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      // Ukuran A4 dalam mm
+      const pdfWidth = 210;
+      const pdfHeight = 297;
+      
+      // Hitung rasio untuk memastikan gambar sesuai dengan ukuran A4
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      // Tambahkan gambar ke PDF dengan ukuran yang tepat
+      let heightLeft = imgHeight;
+      let position = 0;
+      
+      // Halaman pertama
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+      
+      // Tambahkan halaman tambahan jika konten terlalu panjang
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+      
       const pdfBlob = pdf.output('blob');
       
       const formData = new FormData();

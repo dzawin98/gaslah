@@ -61,19 +61,7 @@ const apiClient = axios.create({
   },
 });
 
-// Request interceptor
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
+// Authentication removed - no token interceptor needed
 
 // Router API functions
 const getRouters = async (): Promise<ApiResponse<RouterDevice[]>> => {
@@ -334,7 +322,7 @@ const deleteTransaction = async (id: string): Promise<ApiResponse<void>> => {
 // MikroTik API functions
 const getPPPSecrets = async (routerId: string): Promise<ApiResponse<PPPSecret[]>> => {
   try {
-    const response = await apiClient.get(`/mikrotik/${routerId}/ppp/secrets`);
+    const response = await apiClient.get(`/routers/${routerId}/ppp-secrets`);
     return response.data;
   } catch (error) {
     console.error('Error fetching PPP secrets:', error);

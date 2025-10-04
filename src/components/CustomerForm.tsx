@@ -10,7 +10,7 @@ import { CalendarIcon, Search, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { Customer } from '@/types/isp';
 import { useAreas } from '@/hooks/useAreas';
@@ -18,6 +18,7 @@ import { useRouters } from '@/hooks/useRouters';
 import { useODP } from '@/hooks/useODP';
 import { usePackages } from '@/hooks/usePackages';
 import { toast } from 'sonner';
+import { api } from '@/utils/api';
 
 interface CustomerFormProps {
   customer?: Customer;
@@ -79,14 +80,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
     ...customer
   });
 
-  const [pppSecrets, setPppSecrets] = useState<string[]>([]);
+  const [pppSecrets, setPppSecrets] = useState<PPPSecret[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [pppSearchTerm, setPppSearchTerm] = useState('');
   const [isPppDialogOpen, setIsPppDialogOpen] = useState(false);
 
   // Filter PPP secrets based on search term
   const filteredPppSecrets = pppSecrets.filter(secret => 
-    secret.toLowerCase().includes(pppSearchTerm.toLowerCase())
+    secret.name.toLowerCase().includes(pppSearchTerm.toLowerCase())
   );
 
   // Filter ODP yang tersedia (memiliki slot kosong)
@@ -154,8 +155,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
     if (formData.router && formData.pppSecretType === 'existing') {
       const selectedRouter = routers.find(r => r.name === formData.router);
       if (selectedRouter) {
+        console.log('Loading PPP secrets for router:', selectedRouter.name, 'ID:', selectedRouter.id);
         loadPPPSecrets(selectedRouter.id.toString());
       }
+    } else if (formData.pppSecretType !== 'existing') {
+      // Clear PPP secrets when not using existing secrets
+      setPppSecrets([]);
     }
   }, [formData.router, formData.pppSecretType, routers]);
 
@@ -348,19 +353,45 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   const loadPPPSecrets = async (routerId: string) => {
     setLoadingSecrets(true);
     try {
-      const response = await fetch(`https://api.latansa.my.id/api/routers/${routerId}/ppp-secrets`);
+      // Try using the API client first
+      try {
+        const response = await api.getPPPSecrets(routerId);
+        console.log('PPP Secrets loaded via API client:', response);
+        
+        const secretsArray = Array.isArray(response.data) ? response.data : (response.data || []);
+        setPppSecrets(secretsArray);
+        
+        if (secretsArray.length === 0) {
+          console.warn('No PPP secrets found for router:', routerId);
+        }
+        return; // Success, exit early
+      } catch (apiError: any) {
+        console.warn('API client failed:', apiError);
+      }
+      
+      // Fallback to direct fetch if API client fails
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+      
+      const response = await fetch(`${API_BASE_URL}/routers/${routerId}/ppp-secrets`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
       if (response.ok) {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const secrets = await response.json();
-          const secretNames = secrets.map((secret: any) => secret.name || secret);
-          setPppSecrets(secretNames);
-        } else {
-          console.warn('PPP Secrets API not available - using manual input only');
-          setPppSecrets([]);
+        const secrets = await response.json();
+        console.log('PPP Secrets loaded via direct fetch:', secrets);
+        
+        // Handle both array response and API response format
+        const secretsArray = Array.isArray(secrets) ? secrets : (secrets.data || []);
+        setPppSecrets(secretsArray);
+        
+        if (secretsArray.length === 0) {
+          console.warn('No PPP secrets found for router:', routerId);
         }
       } else {
-        console.warn('PPP Secrets API endpoint not found - using manual input only');
+        console.warn('PPP Secrets API endpoint returned error:', response.status, response.statusText);
         setPppSecrets([]);
       }
     } catch (error) {
@@ -423,10 +454,24 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   };
 
   const handleChange = (field: keyof Customer, value: string | number | boolean) => {
+    console.log('Field changed:', field, 'Value:', value);
     setFormData(prev => ({ ...prev, [field]: value }));
+    
+    // Special handling for pppSecretType changes
+    if (field === 'pppSecretType' && value === 'existing' && formData.router) {
+      const selectedRouter = routers.find(r => r.name === formData.router);
+      if (selectedRouter) {
+        console.log('PPP Secret type changed to existing, loading secrets for router:', selectedRouter.name);
+        loadPPPSecrets(selectedRouter.id.toString());
+      }
+    } else if (field === 'pppSecretType' && value !== 'existing') {
+      // Clear PPP secrets when switching away from 'existing'
+      setPppSecrets([]);
+    }
   };
 
   const handleRouterChange = (routerName: string) => {
+    console.log('Router changed to:', routerName);
     setFormData(prev => ({ 
       ...prev, 
       router: routerName,
@@ -434,9 +479,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
     }));
     setPppSecrets([]);
     
+    // Load PPP secrets if pppSecretType is already set to 'existing'
     if (formData.pppSecretType === 'existing') {
       const selectedRouter = routers.find(r => r.name === routerName);
       if (selectedRouter) {
+        console.log('Loading PPP secrets for newly selected router:', selectedRouter.name, 'ID:', selectedRouter.id);
         loadPPPSecrets(selectedRouter.id.toString());
       }
     }
@@ -650,6 +697,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
                     <DialogContent className="max-w-md">
                       <DialogHeader>
                         <DialogTitle>Pilih PPP Secret</DialogTitle>
+                        <DialogDescription>
+                          Pilih PPP Secret yang tersedia dari router untuk pelanggan ini.
+                        </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         <div className="relative">
@@ -675,7 +725,10 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
                         
                         {loadingSecrets && (
                           <div className="text-center py-4">
-                            <p className="text-sm text-gray-500">Loading PPP Secrets...</p>
+                            <div className="flex items-center justify-center space-x-2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                              <p className="text-sm text-gray-500">Memuat PPP Secrets dari router...</p>
+                            </div>
                           </div>
                         )}
                         
@@ -687,7 +740,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
                         
                         {!loadingSecrets && filteredPppSecrets.length === 0 && !pppSearchTerm && pppSecrets.length === 0 && (
                           <div className="text-center py-4">
-                            <p className="text-sm text-gray-500">Pilih router terlebih dahulu untuk melihat PPP Secrets</p>
+                            <p className="text-sm text-gray-500">
+                              {!formData.router 
+                                ? "Pilih router terlebih dahulu untuk melihat PPP Secrets" 
+                                : "Tidak ada PPP Secret yang tersedia untuk router ini"}
+                            </p>
                           </div>
                         )}
                         
@@ -698,12 +755,16 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
                                 key={index}
                                 className="cursor-pointer hover:bg-gray-100 p-3 rounded border transition-colors"
                                 onClick={() => {
-                                  handleChange('pppSecret', secret);
+                                  handleChange('pppSecret', secret.name);
                                   setPppSearchTerm('');
                                   setIsPppDialogOpen(false);
                                 }}
                               >
-                                <div className="font-medium text-sm">{secret}</div>
+                                <div className="font-medium text-sm">{secret.name}</div>
+                                <div className="text-xs text-gray-500">
+                                  Profile: {secret.profile} | Service: {secret.service}
+                                  {secret.disabled && <span className="text-red-500 ml-2">(Disabled)</span>}
+                                </div>
                               </div>
                             ))}
                           </div>

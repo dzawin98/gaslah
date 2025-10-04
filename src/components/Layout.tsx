@@ -10,7 +10,7 @@ import {
   BarChart3,
   User,
   Network,
-  LogOut,
+  // LogOut removed,
   Menu,
   X,
   TrendingUp,
@@ -20,11 +20,11 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useAuth } from '@/contexts/AuthContext';
+// Authentication removed
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
-  const { logout, user } = useAuth();
+  // Authentication removed - no user context needed
   const [logoError, setLogoError] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -43,13 +43,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { name: 'Laporan Komisi', href: '/commission-reports', icon: DollarSign },
   ];
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
-  };
+  // Logout functionality removed
 
   const handleLogoError = () => {
     setLogoError(true);
@@ -94,22 +88,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={handleLogout}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
-              </Button>
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center">
                   <User className="h-4 w-4 text-white" />
                 </div>
                 <div className="text-sm">
-                  <p className="font-medium">{user?.fullName || user?.username || 'User'}</p>
-                  <p className="text-gray-500">{user?.role?.toUpperCase() || 'USER'}</p>
+                  <p className="font-medium">Admin User</p>
+                  <p className="text-gray-500">ADMIN</p>
                 </div>
               </div>
             </div>
