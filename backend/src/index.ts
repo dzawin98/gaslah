@@ -716,6 +716,118 @@ app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
   }
 });
 
+// Disable PPP user for a customer
+app.post('/api/mikrotik/ppp/disable/:customerId', async (req: Request, res: Response) => {
+  try {
+    const { customerId } = req.params;
+    const customer = await db.Customer.findByPk(customerId, {
+      include: [{ model: db.Router, as: 'routerData' }]
+    });
+
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+
+    const username = customer.pppSecret;
+    const routerName = customer?.routerData?.name || customer?.routerName;
+
+    if (!username) {
+      return res.status(400).json({ success: false, message: 'Customer does not have PPP Secret' });
+    }
+    if (!routerName) {
+      return res.status(400).json({ success: false, message: 'Customer does not have valid router' });
+    }
+
+    const mikrotikAPI = require('../utils/mikrotik');
+    const result = await mikrotikAPI.disablePPPSecret(routerName, username);
+
+    if (result.success) {
+      await customer.update({ mikrotikStatus: 'disabled', serviceStatus: 'inactive' });
+      return res.json({ success: true, message: 'PPP user disabled', data: { mikrotikResult: result } });
+    }
+
+    return res.status(500).json({ success: false, message: `Failed to disable PPP user: ${result.message}`, error: result.error });
+  } catch (error: any) {
+    console.error('Error disabling PPP user:', error);
+    return res.status(500).json({ success: false, message: 'Error disabling PPP user', error: error.message });
+  }
+});
+
+// Enable PPP user for a customer
+app.post('/api/mikrotik/ppp/enable/:customerId', async (req: Request, res: Response) => {
+  try {
+    const { customerId } = req.params;
+    const customer = await db.Customer.findByPk(customerId, {
+      include: [{ model: db.Router, as: 'routerData' }]
+    });
+
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+
+    const username = customer.pppSecret;
+    const routerName = customer?.routerData?.name || customer?.routerName;
+
+    if (!username) {
+      return res.status(400).json({ success: false, message: 'Customer does not have PPP Secret' });
+    }
+    if (!routerName) {
+      return res.status(400).json({ success: false, message: 'Customer does not have valid router' });
+    }
+
+    const mikrotikAPI = require('../utils/mikrotik');
+    const result = await mikrotikAPI.enablePPPSecret(routerName, username);
+
+    if (result.success) {
+      await customer.update({ mikrotikStatus: 'active', serviceStatus: 'active' });
+      return res.json({ success: true, message: 'PPP user enabled', data: { mikrotikResult: result } });
+    }
+
+    return res.status(500).json({ success: false, message: `Failed to enable PPP user: ${result.message}`, error: result.error });
+  } catch (error: any) {
+    console.error('Error enabling PPP user:', error);
+    return res.status(500).json({ success: false, message: 'Error enabling PPP user', error: error.message });
+  }
+});
+
+// Check PPP user status for a customer
+app.get('/api/mikrotik/ppp/status/:customerId', async (req: Request, res: Response) => {
+  try {
+    const { customerId } = req.params;
+    const customer = await db.Customer.findByPk(customerId, {
+      include: [{ model: db.Router, as: 'routerData' }]
+    });
+
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+
+    const username = customer.pppSecret;
+    const routerName = customer?.routerData?.name || customer?.routerName;
+
+    if (!username) {
+      return res.status(400).json({ success: false, message: 'Customer does not have PPP Secret' });
+    }
+    if (!routerName) {
+      return res.status(400).json({ success: false, message: 'Customer does not have valid router' });
+    }
+
+    const mikrotikAPI = require('../utils/mikrotik');
+    const result = await mikrotikAPI.checkPPPSecretStatus(routerName, username);
+
+    if (result.success) {
+      const status = result.found ? (result.disabled ? 'disabled' : 'active') : 'not_found';
+      const active = result.found ? !result.disabled : false;
+      return res.json({ success: true, message: 'Status retrieved', data: { status, active } });
+    }
+
+    return res.status(500).json({ success: false, message: result.message || 'Failed to get status', error: result.error });
+  } catch (error: any) {
+    console.error('Error checking PPP user status:', error);
+    return res.status(500).json({ success: false, message: 'Error checking PPP user status', error: error.message });
+  }
+});
+
 // ODP CRUD Endpoints
 
 // Get all ODPs

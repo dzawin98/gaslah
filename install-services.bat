@@ -1,8 +1,8 @@
 @echo off
 echo Installing services...
 
-REM Install backend service
-C:\nssm-2.24\win64\nssm.exe install latansabackend "C:\Program Files\nodejs\node.exe" "C:\gaslah\backend\src\index.js"
+REM Install backend service (run built dist/index.js)
+C:\nssm-2.24\win64\nssm.exe install latansabackend "C:\Program Files\nodejs\node.exe" "C:\gaslah\backend\dist\index.js"
 C:\nssm-2.24\win64\nssm.exe set latansabackend AppDirectory C:\gaslah\backend
 C:\nssm-2.24\win64\nssm.exe set latansabackend AppEnvironmentExtra NODE_ENV=production
 C:\nssm-2.24\win64\nssm.exe set latansabackend Start SERVICE_AUTO_START

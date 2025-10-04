@@ -32,7 +32,7 @@ if not errorlevel 1 (
 
 echo Installing backend service...
 C:\nssm-2.24\win64\nssm.exe install latansabackend "C:\Program Files\nodejs\node.exe"
-C:\nssm-2.24\win64\nssm.exe set latansabackend AppParameters "C:\gaslah\backend\src\index.js"
+C:\nssm-2.24\win64\nssm.exe set latansabackend AppParameters "C:\gaslah\backend\dist\index.js"
 C:\nssm-2.24\win64\nssm.exe set latansabackend AppDirectory "C:\gaslah\backend"
 C:\nssm-2.24\win64\nssm.exe set latansabackend AppEnvironmentExtra "NODE_ENV=production"
 C:\nssm-2.24\win64\nssm.exe set latansabackend Start SERVICE_AUTO_START

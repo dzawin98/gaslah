@@ -14,6 +14,7 @@ import Areas from "./pages/Areas";
 import Packages from "./pages/Packages";
 import Messages from "./pages/Messages";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
 import ODP from "./pages/ODP";
 import Receipt from '@/pages/Receipt';
 import Reports from "./pages/Reports";
@@ -31,6 +32,7 @@ const App = () => (
         <BrowserRouter>
             <Layout>
               <Routes>
+                <Route path="/login" element={<Login />} />
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/customers" element={<Customers />} />
                 <Route path="/transactions" element={<Transactions />} />

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Users, 
   CreditCard, 
@@ -25,6 +25,7 @@ import { Card } from '@/components/ui/card';
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
   // Authentication removed - no user context needed
+  const navigate = useNavigate();
   const [logoError, setLogoError] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -42,6 +43,21 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { name: 'Laporan', href: '/reports', icon: TrendingUp },
     { name: 'Laporan Komisi', href: '/commission-reports', icon: DollarSign },
   ];
+
+  // Guard ringan: arahkan ke /login bila belum login
+  useEffect(() => {
+    try {
+      const isLoggedIn = localStorage.getItem('simpleLogin') === '1';
+      if (!isLoggedIn && location.pathname !== '/login') {
+        navigate('/login', { replace: true });
+      }
+    } catch {
+      // Jika localStorage tidak tersedia, tetap arahkan ke login
+      if (location.pathname !== '/login') {
+        navigate('/login', { replace: true });
+      }
+    }
+  }, [location.pathname, navigate]);
 
   // Logout functionality removed
 
