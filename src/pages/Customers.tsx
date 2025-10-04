@@ -263,32 +263,79 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
 
   // Helper function untuk menentukan status - pindahkan ke atas sebelum filteredCustomers
   const getCustomerStatus = (customer: Customer) => {
+    // Normalisasi tanggal ke 00:00:00 agar perbandingan akurat
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentDay = today.getDate();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
     const expireDate = customer.expireDate ? new Date(customer.expireDate) : null;
-    const currentDate = today.getDate();
-    
-    // Jika sudah melewati expireDate, otomatis SUSPENDED
-    if (expireDate && today > expireDate) {
-      return 'SUSPENDED';
-    }
-    
-    // Untuk POSTPAID - ikuti aturan masa bayar
-    if (customer.billingType === 'postpaid') {
-      if (currentDate >= 1 && currentDate <= 5) {
-        if (customer.billingStatus === 'belum_lunas') {
-          return 'BELUM BAYAR';
-        }
-      } else {
-        if (customer.billingStatus === 'belum_lunas') {
-          return 'SUSPENDED';
-        }
-      }
-    }
-    
+    if (expireDate) expireDate.setHours(0, 0, 0, 0);
+
+    // Ambil tanggal jatuh tempo dinamis dari paymentDueDate bila ada, fallback ke 5
+    const dueDateObj = customer.paymentDueDate ? new Date(customer.paymentDueDate) : null;
+    const dueDay = dueDateObj ? dueDateObj.getDate() : 5;
+    const withinBillingWindow = currentDay >= 1 && currentDay <= dueDay;
+
+    // Cek pembayaran bulan ini (untuk postpaid), fallback ke billingStatus
+    const lastBillingDate = customer.lastBillingDate ? new Date(customer.lastBillingDate) : null;
+    if (lastBillingDate) lastBillingDate.setHours(0, 0, 0, 0);
+    const hasPaidThisMonth = !!(
+      lastBillingDate &&
+      lastBillingDate.getMonth() === currentMonth &&
+      lastBillingDate.getFullYear() === currentYear
+    );
+
+    const isPostpaid = customer.billingType === 'postpaid';
+    const isPrepaid = customer.billingType === 'prepaid';
+
+    // Indikator suspend eksplisit dari backend
     if (customer.status === 'suspended' || customer.billingStatus === 'suspend') {
       return 'SUSPENDED';
     }
-    
+
+    // Prepaid: status ditentukan oleh expireDate.
+    // - Jika belum lewat expireDate: AKTIF
+    // - Jika expireDate bulan ini: 1–dueDay = BELUM BAYAR, setelah itu = SUSPENDED
+    // - Jika expireDate bulan lalu/lebih lama: selalu SUSPENDED
+    if (isPrepaid) {
+      if (!expireDate) {
+        // Tanpa expireDate, fallback: anggap aktif kecuali backend menandai suspend
+        return customer.billingStatus === 'belum_lunas' && withinBillingWindow ? 'BELUM BAYAR' : 'AKTIF';
+      }
+
+      const expired = today.getTime() > expireDate.getTime();
+      if (!expired) {
+        return 'AKTIF';
+      }
+
+      const expireMonth = expireDate.getMonth();
+      const expireYear = expireDate.getFullYear();
+      const expiredThisMonth = (expireMonth === currentMonth && expireYear === currentYear);
+
+      if (expiredThisMonth) {
+        return withinBillingWindow ? 'BELUM BAYAR' : 'SUSPENDED';
+      }
+
+      return 'SUSPENDED';
+    }
+
+    // Postpaid: gunakan jendela 1–dueDay untuk BELUM BAYAR, lalu SUSPENDED
+    if (isPostpaid) {
+      if (withinBillingWindow) {
+        if (customer.billingStatus === 'belum_lunas' || !hasPaidThisMonth) {
+          return 'BELUM BAYAR';
+        }
+        return 'AKTIF';
+      }
+      // Di luar jendela: belum bayar -> SUSPENDED
+      if (customer.billingStatus === 'belum_lunas' || !hasPaidThisMonth) {
+        return 'SUSPENDED';
+      }
+      return 'AKTIF';
+    }
+
     return 'AKTIF';
   };
 
@@ -355,6 +402,38 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedArea, selectedRouter, selectedPackage, selectedODP, selectedStatus, itemsPerPage]);
+
+  // Helper: safe integer conversion for prices to avoid NaN
+  const toInt = (v: unknown) => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 0;
+    let s = String(v).trim();
+    if (s === '') return 0;
+    // Normalize Indonesian currency formats, e.g., "Rp 300.000,00" or "300.000,-"
+    s = s.replace(/[rR][pP]/g, '').replace(/\s+/g, '');
+    // Handle decimal separators:
+    // 1) If comma present, drop everything after comma (IDR style)
+    const commaIdx = s.indexOf(',');
+    if (commaIdx !== -1) {
+      s = s.slice(0, commaIdx);
+    } else {
+      // 2) If no comma, but dot used as decimal (e.g., 300000.00), drop after last dot when it looks like decimals
+      const lastDot = s.lastIndexOf('.');
+      if (lastDot !== -1) {
+        const decimals = s.slice(lastDot + 1);
+        if (/^\d{1,2}$/.test(decimals)) {
+          s = s.slice(0, lastDot);
+        }
+      }
+    }
+    // Remove thousand separators dots left (e.g., 300.000 -> 300000)
+    s = s.replace(/\./g, '');
+    // Keep digits and optional minus
+    s = s.replace(/[^0-9-]/g, '');
+    if (s === '' || s === '-') return 0;
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) ? n : 0;
+  };
 
   // HAPUS deklarasi fungsi getCustomerStatus yang duplikat di sini (baris 345-371)
   // Fungsi sudah dideklarasikan di atas sebelum filteredCustomers
@@ -792,8 +871,12 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
               <span className="font-semibold text-green-600">
                 {(() => {
                   const grandTotal = filteredCustomers.reduce((total, customer) => {
-                    const price = customer.packagePrice || 0;
-                    return total + price;
+                    const status = getCustomerStatus(customer);
+                    if (status === 'AKTIF' || status === 'BELUM BAYAR') {
+                      const price = toInt(customer.packagePrice);
+                      return total + price;
+                    }
+                    return total;
                   }, 0);
                   return new Intl.NumberFormat('id-ID', {
                     style: 'currency',
@@ -811,7 +894,7 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                   const totalTagihan = filteredCustomers.reduce((total, customer) => {
                     const status = getCustomerStatus(customer);
                     if (status === 'BELUM BAYAR' || status === 'SUSPENDED') {
-                      const price = customer.packagePrice || 0;
+                      const price = toInt(customer.packagePrice);
                       return total + price;
                     }
                     return total;

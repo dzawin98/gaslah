@@ -7,8 +7,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Send, Users, MessageSquare, Clock, Settings, FileText, Trash2, Edit } from 'lucide-react';
+import { Plus, Send, Users, MessageSquare, Clock, Settings, FileText, Trash2, Edit, RefreshCcw } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useAreas } from '@/hooks/useAreas';
 import { usePackages } from '@/hooks/usePackages';
@@ -24,6 +25,8 @@ interface MessageHistory {
   criteria: string;
   sentAt: Date;
   status: 'sent' | 'failed' | 'pending';
+  failedRecipients?: { id: string | number; name: string; phone: string }[];
+  recipientDetails?: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[];
 }
 
 interface MessageTemplate {
@@ -35,13 +38,12 @@ interface MessageTemplate {
 }
 
 interface BroadcastCriteria {
-  area: string;
-  billingType: string;
-  package: string;
-  odp: string;
   paymentStatus: string;
   dateExpiryCriteria: string;
   dateSuspendCriteria: string;
+  area: string;
+  package: string;
+  odp: string;
   sendToCustomer: string;
   message: string;
 }
@@ -50,7 +52,7 @@ const Messages = () => {
   const { customers } = useCustomers();
   const { areas } = useAreas();
   const { packages } = usePackages();
-  const { odp: odps } = useODP();
+  const { odp } = useODP();
   const { toast } = useToast();
   
   const [showBroadcastForm, setShowBroadcastForm] = useState(false);
@@ -60,9 +62,44 @@ const Messages = () => {
   const [messageHistory, setMessageHistory] = useState<MessageHistory[]>([]);
   const [messageTemplates, setMessageTemplates] = useState<MessageTemplate[]>([]);
   const [isSending, setIsSending] = useState(false);
+  // Jeda antar pesan (default 5 detik)
+  const [sendDelayMs] = useState(5000);
+  // Antrian pengiriman per pelanggan
+  type QueueStatus = 'queued' | 'sending' | 'sent' | 'failed';
+  interface QueueItem {
+    id: string;
+    customerId: string | number;
+    name: string;
+    phone: string;
+    status: QueueStatus;
+    error?: string;
+  }
+  const [sendingQueue, setSendingQueue] = useState<QueueItem[]>([]);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
+  // Dialog: daftar penerima per riwayat
+  const [recipientsDialogOpen, setRecipientsDialogOpen] = useState(false);
+  const [recipientsDialogData, setRecipientsDialogData] = useState<{ id: string; recipients: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[] } | null>(null);
+  const openRecipientsDialog = (history: MessageHistory) => {
+    setRecipientsDialogData({ id: history.id, recipients: history.recipientDetails || [] });
+    setRecipientsDialogOpen(true);
+  };
+  const closeRecipientsDialog = () => {
+    setRecipientsDialogOpen(false);
+    setRecipientsDialogData(null);
+  };
+  // Message detail dialog
+  const [messageDetailOpen, setMessageDetailOpen] = useState(false);
+  const [messageDetailData, setMessageDetailData] = useState<{ id: string; message: string; criteria: string } | null>(null);
+  const openMessageDetail = (history: MessageHistory) => {
+    setMessageDetailData({ id: history.id, message: history.message, criteria: history.criteria });
+    setMessageDetailOpen(true);
+  };
+  const closeMessageDetail = () => {
+    setMessageDetailOpen(false);
+    setMessageDetailData(null);
+  };
   
   const [newTemplate, setNewTemplate] = useState({
     name: '',
@@ -85,6 +122,36 @@ const Messages = () => {
       setFormConfig(config);
     }
   }, [config]);
+
+  // Load message history dari localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('messageHistory');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const restored: MessageHistory[] = (parsed || []).map((h: any) => ({
+          ...h,
+          sentAt: h.sentAt ? new Date(h.sentAt) : new Date()
+        }));
+        setMessageHistory(restored.slice(0, 200));
+      }
+    } catch (e) {
+      console.error('Error loading message history:', e);
+    }
+  }, []);
+
+  // Persist message history ke localStorage saat berubah
+  useEffect(() => {
+    try {
+      const serializable = messageHistory.map(h => ({
+        ...h,
+        sentAt: h.sentAt instanceof Date ? h.sentAt.toISOString() : h.sentAt
+      }));
+      localStorage.setItem('messageHistory', JSON.stringify(serializable));
+    } catch (e) {
+      console.error('Error saving message history:', e);
+    }
+  }, [messageHistory]);
 
   // Load templates from localStorage
   useEffect(() => {
@@ -123,16 +190,19 @@ const Messages = () => {
   }, []);
   
   const [broadcastData, setBroadcastData] = useState<BroadcastCriteria>({
-    area: '',
-    billingType: '',
-    package: '',
-    odp: '',
     paymentStatus: '',
     dateExpiryCriteria: '',
     dateSuspendCriteria: '',
+    area: '',
+    package: '',
+    odp: '',
     sendToCustomer: '',
     message: `Pemberitahuan Pemeliharaan Jaringan\n\nKepada Pelanggan Yth,\n\nKami ingin memberitahukan bahwa saat ini kami sedang melakukan pemeliharaan jaringan di area [AREA], dikarenakan adanya gangguan pada kabel Fiber yang putus.\n\nNama: [NAMA]\nNo. Pelanggan: [NOPEL]\nPaket: [PAKET]\n\nMohon pengertian Anda atas ketidaknyamanan yang terjadi.`
   });
+
+  // Dialog pemilih pelanggan
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
 
   // Template management functions
   const saveTemplate = () => {
@@ -264,70 +334,95 @@ const Messages = () => {
           return false;
         }
       }
-      
-      // Area filter
+
+      // Filter ODP, Wilayah (Area), dan Paket
+      // Area
       if (broadcastData.area && broadcastData.area !== 'all') {
         if (customer.area !== broadcastData.area) {
-          console.log('Filtered out by area:', customer.name, 'Expected:', broadcastData.area, 'Actual:', customer.area);
+          console.log('Filtered out by area:', customer.name, 'area:', customer.area, 'filter:', broadcastData.area);
           return false;
         }
       }
-      
-      // Billing type filter
-      if (broadcastData.billingType && broadcastData.billingType !== 'all') {
-        if (customer.billingType !== broadcastData.billingType) {
-          console.log('Filtered out by billing type:', customer.name, 'Expected:', broadcastData.billingType, 'Actual:', customer.billingType);
-          return false;
-        }
-      }
-      
-      // Package filter
+      // Paket
       if (broadcastData.package && broadcastData.package !== 'all') {
         if (customer.package !== broadcastData.package) {
-          console.log('Filtered out by package:', customer.name, 'Expected:', broadcastData.package, 'Actual:', customer.package);
+          console.log('Filtered out by package:', customer.name, 'package:', customer.package, 'filter:', broadcastData.package);
           return false;
         }
       }
-      
-      // ODP filter - perbaiki untuk menggunakan odpData.name
+      // ODP (gunakan nama ODP dari relasi atau slot ODP jika tersedia)
       if (broadcastData.odp && broadcastData.odp !== 'all') {
-        const customerOdpName = customer.odpData?.name || customer.odpSlot || '';
-        if (!customerOdpName.includes(broadcastData.odp)) {
-          console.log('Filtered out by ODP:', customer.name, 'Expected:', broadcastData.odp, 'Actual:', customerOdpName);
+        const selectedODP = broadcastData.odp.toLowerCase().trim();
+        const customerODPName = (customer.odpData?.name || '').toLowerCase().trim();
+        const customerODPSlotRaw = (customer.odpSlot || '').toLowerCase().trim();
+        const customerODPSlotBase = customerODPSlotRaw.split('/')[0];
+        const matchesODP = customerODPName === selectedODP || customerODPSlotRaw === selectedODP || customerODPSlotBase === selectedODP;
+        if (!matchesODP) {
+          console.log('Filtered out by ODP:', customer.name, 'odpData.name:', customerODPName, 'odpSlotRaw:', customerODPSlotRaw, 'odpSlotBase:', customerODPSlotBase, 'filter:', selectedODP);
           return false;
         }
       }
       
-      // Payment status filter - perbaiki logika
+      // Payment status filter — selaraskan dengan due day (paymentDueDate) dan aturan prepaid/postpaid
       if (broadcastData.paymentStatus && broadcastData.paymentStatus !== 'all') {
-        // Gunakan billingStatus jika tersedia
-        if (customer.billingStatus) {
-          const isPaid = customer.billingStatus === 'lunas';
-          if (broadcastData.paymentStatus === 'paid' && !isPaid) {
-            console.log('Filtered out by payment status (billing):', customer.name, 'Expected: paid, Actual:', customer.billingStatus);
+        const now = new Date();
+        const currentDay = now.getDate();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        // Normalize today and important dates
+        const today = new Date(); today.setHours(0,0,0,0);
+        const expireDate = customer.expireDate ? new Date(customer.expireDate) : null;
+        if (expireDate) expireDate.setHours(0,0,0,0);
+        const lastBillingDate = customer.lastBillingDate ? new Date(customer.lastBillingDate) : null;
+        if (lastBillingDate) lastBillingDate.setHours(0,0,0,0);
+
+        // due day from paymentDueDate if available, fallback to 5
+        const dueDateObj = customer.paymentDueDate ? new Date(customer.paymentDueDate) : null;
+        const dueDay = dueDateObj ? dueDateObj.getDate() : 5;
+        const withinBillingWindow = currentDay >= 1 && currentDay <= dueDay;
+
+        const hasPaidThisMonth = !!(lastBillingDate && lastBillingDate.getMonth() === currentMonth && lastBillingDate.getFullYear() === currentYear);
+        const isPostpaid = customer.billingType === 'postpaid';
+        const isPrepaid = customer.billingType === 'prepaid';
+        const isSuspendedLike = (customer.status === 'suspended') || (customer.billingStatus === 'suspend') || (customer.mikrotikStatus === 'disabled') || !!customer.isIsolated;
+
+        // Helper flags for prepaid
+        const expired = expireDate ? expireDate.getTime() < today.getTime() : false;
+        const expiredThisMonth = !!(expireDate && expireDate.getMonth() === currentMonth && expireDate.getFullYear() === currentYear && expired);
+
+        if (broadcastData.paymentStatus === 'paid') {
+          // Postpaid: paid if has payment in current month
+          // Prepaid: paid/active if not expired
+          const isPaid = isPostpaid ? hasPaidThisMonth : !expired;
+          if (!isPaid) {
+            console.log('Filtered out by payment status (paid rule):', customer.name, { hasPaidThisMonth, expired });
             return false;
           }
-          if (broadcastData.paymentStatus === 'unpaid' && isPaid) {
-            console.log('Filtered out by payment status (billing):', customer.name, 'Expected: unpaid, Actual:', customer.billingStatus);
-            return false;
-          }
-        } else {
-          // Fallback ke logika tanggal jatuh tempo
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const expireDate = customer.expireDate ? new Date(customer.expireDate) : null;
-          if (expireDate) {
-            expireDate.setHours(0, 0, 0, 0);
-          }
-          const isOverdue = expireDate ? expireDate.getTime() < today.getTime() : false;
-          
-          if (broadcastData.paymentStatus === 'paid' && isOverdue) {
-            console.log('Filtered out by payment status (date):', customer.name, 'Overdue');
-            return false;
-          }
-          if (broadcastData.paymentStatus === 'unpaid' && !isOverdue) {
-            console.log('Filtered out by payment status (date):', customer.name, 'Not overdue');
-            return false;
+        }
+
+        if (broadcastData.paymentStatus === 'unpaid') {
+          if (isPostpaid) {
+            const isUnpaidThisWindow = withinBillingWindow && !hasPaidThisMonth && !isSuspendedLike;
+            if (!isUnpaidThisWindow) {
+              console.log('Filtered out by payment status (postpaid unpaid with dueDay):', customer.name, { currentDay, dueDay, withinBillingWindow, hasPaidThisMonth, isSuspendedLike });
+              return false;
+            }
+          } else if (isPrepaid) {
+            // Prepaid: only show as unpaid if expired this month AND within billing window
+            const isUnpaidPrepaidWindow = expiredThisMonth && withinBillingWindow && !isSuspendedLike;
+            if (!isUnpaidPrepaidWindow) {
+              console.log('Filtered out by payment status (prepaid expired this month + window):', customer.name, { expiredThisMonth, withinBillingWindow, isSuspendedLike });
+              return false;
+            }
+          } else {
+            // Other types: fallback to not overdue as paid, overdue within window as unpaid
+            const isOverdue = expireDate ? expireDate.getTime() < today.getTime() : false;
+            const ok = withinBillingWindow && isOverdue && !isSuspendedLike;
+            if (!ok) {
+              console.log('Filtered out by payment status (fallback type rule):', customer.name, { isOverdue, withinBillingWindow, isSuspendedLike });
+              return false;
+            }
           }
         }
       }
@@ -375,39 +470,80 @@ const Messages = () => {
         }
       }
       
-      // PERBAIKAN: Suspend criteria - logika yang benar dan opsi yang lebih lengkap
+      // PERBAIKAN UTAMA: Logika ISOLIR/SUSPEND — normalisasi nilai dan tambahkan derivasi kebijakan
       if (broadcastData.dateSuspendCriteria && broadcastData.dateSuspendCriteria !== 'all') {
-        if (broadcastData.dateSuspendCriteria === 'isolated') {
-          // Filter pelanggan yang sedang diisolir
-          if (!customer.isIsolated) {
-            console.log('Filtered out by suspend criteria (not isolated):', customer.name);
-            return false;
-          }
-        } else if (broadcastData.dateSuspendCriteria === 'not_isolated') {
-          // Filter pelanggan yang tidak diisolir
-          if (customer.isIsolated) {
-            console.log('Filtered out by suspend criteria (is isolated):', customer.name);
-            return false;
-          }
-        } else if (broadcastData.dateSuspendCriteria === 'suspended') {
-          // Filter pelanggan dengan status suspended
-          if (customer.status !== 'suspended') {
-            console.log('Filtered out by suspend criteria (not suspended):', customer.name, 'Status:', customer.status);
+        // Normalisasi nilai string (case-insensitive dan variasi istilah umum)
+        const statusNorm = (customer.status || '').toString().trim().toLowerCase();
+        const billingStatusNorm = (customer.billingStatus || '').toString().trim().toLowerCase();
+        const mikrotikStatusNorm = (customer.mikrotikStatus || '').toString().trim().toLowerCase();
+        const isolated = !!customer.isIsolated;
+
+        // Hitung jendela due day yang dipersonalisasi
+        const now = new Date();
+        const currentDay = now.getDate();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const today = new Date(); today.setHours(0,0,0,0);
+
+        const expireDate = customer.expireDate ? new Date(customer.expireDate) : null;
+        if (expireDate) expireDate.setHours(0,0,0,0);
+
+        const lastBillingDate = customer.lastBillingDate ? new Date(customer.lastBillingDate) : null;
+        if (lastBillingDate) lastBillingDate.setHours(0,0,0,0);
+
+        const dueDateObj = customer.paymentDueDate ? new Date(customer.paymentDueDate) : null;
+        const dueDay = dueDateObj ? dueDateObj.getDate() : 5;
+        const withinBillingWindow = currentDay >= 1 && currentDay <= dueDay;
+
+        const hasPaidThisMonth = !!(lastBillingDate && lastBillingDate.getMonth() === currentMonth && lastBillingDate.getFullYear() === currentYear);
+        const isPostpaid = customer.billingType === 'postpaid';
+        const isPrepaid = customer.billingType === 'prepaid';
+
+        // Prepaid flags
+        const expired = expireDate ? expireDate.getTime() < today.getTime() : false;
+        const expiredThisMonth = !!(expireDate && expireDate.getMonth() === currentMonth && expireDate.getFullYear() === currentYear && expired);
+        const expiredPrevMonthOrOlder = !!(expireDate && expired && (expireDate.getMonth() !== currentMonth || expireDate.getFullYear() !== currentYear));
+
+        // Deteksi Suspended berdasarkan kebijakan (tanpa bergantung ke backend flags)
+        const isSuspendedByPolicy = (
+          (isPostpaid && !withinBillingWindow && !hasPaidThisMonth) ||
+          (isPrepaid && (expiredPrevMonthOrOlder || (expiredThisMonth && !withinBillingWindow)))
+        );
+
+        // Deteksi Suspended berdasarkan flag backend/operasional
+        const suspendedByStatus = statusNorm === 'suspended' || statusNorm === 'suspend';
+        const suspendedByBilling = billingStatusNorm === 'suspend';
+        const mikrotikDisabled = mikrotikStatusNorm === 'disabled' || mikrotikStatusNorm === 'disable' || mikrotikStatusNorm === 'nonaktif' || mikrotikStatusNorm === 'off';
+
+        const isSuspendedRaw = suspendedByStatus || suspendedByBilling || mikrotikDisabled || isolated;
+
+        // Terapkan kriteria
+        if (broadcastData.dateSuspendCriteria === 'suspended') {
+          // Ditampilkan jika suspended oleh flag backend ATAU menurut kebijakan due-day
+          const isSuspended = isSuspendedRaw || isSuspendedByPolicy;
+          if (!isSuspended) {
+            console.log('Filtered out by suspend criteria (not suspended):', customer.name, {
+              status: customer.status,
+              billingStatus: customer.billingStatus,
+              mikrotikStatus: customer.mikrotikStatus,
+              isIsolated: customer.isIsolated,
+              isSuspendedByPolicy
+            });
             return false;
           }
         } else if (broadcastData.dateSuspendCriteria === 'active') {
-          // Filter pelanggan dengan status active
-          if (customer.status !== 'active') {
-            console.log('Filtered out by suspend criteria (not active):', customer.name, 'Status:', customer.status);
+          // Active: bukan suspended (flag/kebijakan) dan tidak diisolir
+          const notSuspended = !(isSuspendedRaw || isSuspendedByPolicy);
+          if (!notSuspended || isolated) {
+            console.log('Filtered out by suspend criteria (not active):', customer.name, {
+              status: customer.status,
+              billingStatus: customer.billingStatus,
+              mikrotikStatus: customer.mikrotikStatus,
+              isIsolated: customer.isIsolated,
+              isSuspendedByPolicy
+            });
             return false;
           }
-        } else if (broadcastData.dateSuspendCriteria === 'today') {
-          // Filter pelanggan yang diisolir hari ini (memerlukan data lastSuspendDate)
-          if (!customer.isIsolated) {
-            console.log('Filtered out by suspend criteria (not isolated today):', customer.name);
-            return false;
-          }
-          // Bisa ditambahkan logika untuk cek tanggal isolir jika ada field lastSuspendDate
         }
       }
       
@@ -606,32 +742,26 @@ const Messages = () => {
       let successCount = 0;
       let failedCount = 0;
       const failedCustomers: string[] = [];
-      
-      for (const customer of targetCustomers) {
-        try {
-          const personalizedMessage = replaceMessagePlaceholders(broadcastData.message, customer);
-          const success = await sendWhatsAppMessage(customer.phone, personalizedMessage);
-          
-          if (success) {
-            successCount++;
-          } else {
-            failedCount++;
-            failedCustomers.push(customer.name);
-          }
-          
-          // Delay antar pengiriman untuk menghindari rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-        } catch (error) {
-          console.error(`Error sending to ${customer.name}:`, error);
-          failedCount++;
-          failedCustomers.push(customer.name);
-        }
-      }
-      
-      // Simpan ke history
-      const newHistory: MessageHistory = {
-        id: Date.now().toString(),
+      const failedRecipientDetails: { id: string | number; name: string; phone: string }[] = [];
+      const queueBaseId = Date.now().toString();
+
+      // Inisialisasi antrian: semua target jadi queued
+      setSendingQueue(targetCustomers.map((c, idx) => ({
+        id: `${queueBaseId}-${c.id}-${idx}`,
+        customerId: c.id,
+        name: c.name,
+        phone: c.phone,
+        status: 'queued'
+      })));
+
+      // Inisialisasi recipientDetails untuk disimpan di riwayat
+      const recipientDetails: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[] =
+        targetCustomers.map(c => ({ id: c.id, name: c.name, phone: c.phone, status: 'queued' }));
+
+      // Tambahkan entry riwayat sebagai pending terlebih dahulu
+      const historyId = `${queueBaseId}`;
+      const pendingHistory: MessageHistory = {
+        id: historyId,
         recipients: targetCustomers.length,
         message: broadcastData.message,
         criteria: Object.entries(broadcastData)
@@ -639,10 +769,73 @@ const Messages = () => {
           .map(([key, value]) => `${key}: ${value}`)
           .join(', ') || 'Semua pelanggan',
         sentAt: new Date(),
-        status: failedCount === 0 ? 'sent' : failedCount === targetCustomers.length ? 'failed' : 'sent'
+        status: 'pending',
+        failedRecipients: [],
+        recipientDetails
       };
+      setMessageHistory(prev => [pendingHistory, ...prev].slice(0, 200));
       
-      setMessageHistory(prev => [newHistory, ...prev]);
+      for (let i = 0; i < targetCustomers.length; i++) {
+        const customer = targetCustomers[i];
+        try {
+          // Update status antrian: sending
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === customer.id ? { ...item, status: 'sending' } : item
+          ));
+
+          recipientDetails[i].status = 'sending';
+
+          const personalizedMessage = replaceMessagePlaceholders(broadcastData.message, customer);
+          const success = await sendWhatsAppMessage(customer.phone, personalizedMessage);
+          
+          if (success) {
+            successCount++;
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === customer.id ? { ...item, status: 'sent' } : item
+            ));
+            recipientDetails[i].status = 'sent';
+          } else {
+            failedCount++;
+            failedCustomers.push(customer.name);
+            failedRecipientDetails.push({ id: customer.id, name: customer.name, phone: customer.phone });
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === customer.id ? { ...item, status: 'failed', error: 'Gagal mengirim' } : item
+            ));
+            recipientDetails[i].status = 'failed';
+          }
+          
+          // Delay antar pengiriman untuk menghindari rate limiting (5 detik)
+          if (i < targetCustomers.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, sendDelayMs));
+          }
+          
+        } catch (error) {
+          console.error(`Error sending to ${customer.name}:`, error);
+          failedCount++;
+          failedCustomers.push(customer.name);
+          failedRecipientDetails.push({ id: customer.id, name: customer.name, phone: customer.phone });
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === customer.id ? { ...item, status: 'failed', error: 'Exception saat mengirim' } : item
+          ));
+          recipientDetails[i].status = 'failed';
+        }
+      }
+      
+      // Update riwayat: dari pending jadi sent/failed (atau sent jika sebagian berhasil)
+      setMessageHistory(prev => prev
+        .map(h =>
+          h.id === historyId
+            ? {
+                ...h,
+                sentAt: new Date(),
+                status: failedCount === 0 ? 'sent' : failedCount === targetCustomers.length ? 'failed' : 'sent',
+                failedRecipients: failedRecipientDetails,
+                recipientDetails
+              }
+            : h
+        )
+        .slice(0, 200)
+      );
       
       // Reset form
       setBroadcastData(prev => ({
@@ -658,6 +851,8 @@ const Messages = () => {
       }));
       
       setShowBroadcastForm(false);
+      // Reset antrian setelah selesai
+      setSendingQueue([]);
       
       if (successCount > 0) {
         toast({
@@ -683,6 +878,117 @@ const Messages = () => {
       });
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleResendFailed = async (history: MessageHistory) => {
+    if (!history.failedRecipients || history.failedRecipients.length === 0) {
+      toast({ title: 'Info', description: 'Tidak ada penerima gagal untuk dikirim ulang.' });
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      let successCount = 0;
+      let failedCount = 0;
+      const failedAgainDetails: { id: string | number; name: string; phone: string }[] = [];
+      const queueBaseId = Date.now().toString();
+
+      // Inisialisasi antrian dari penerima gagal
+      setSendingQueue(history.failedRecipients.map((c, idx) => ({
+        id: `${queueBaseId}-${c.id}-${idx}`,
+        customerId: c.id,
+        name: c.name,
+        phone: c.phone,
+        status: 'queued'
+      })));
+
+      const recipientDetails: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[] =
+        history.failedRecipients.map(c => ({ id: c.id, name: c.name, phone: c.phone, status: 'queued' }));
+
+      // Buat riwayat pending untuk proses kirim ulang
+      const historyId = `${queueBaseId}`;
+      const pendingHistory: MessageHistory = {
+        id: historyId,
+        recipients: history.failedRecipients.length,
+        message: history.message,
+        criteria: `${history.criteria} (Kirim Ulang Gagal: ${history.sentAt.toLocaleString('id-ID')})`,
+        sentAt: new Date(),
+        status: 'pending',
+        failedRecipients: [],
+        recipientDetails
+      };
+      setMessageHistory(prev => [pendingHistory, ...prev].slice(0, 200));
+
+      for (let i = 0; i < history.failedRecipients.length; i++) {
+        const recipient = history.failedRecipients[i];
+        try {
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === recipient.id ? { ...item, status: 'sending' } : item
+          ));
+
+          const fullCustomer = customers?.find(c => c.id === recipient.id);
+          const personalizedMessage = fullCustomer
+            ? replaceMessagePlaceholders(history.message, fullCustomer)
+            : history.message;
+          const success = await sendWhatsAppMessage(recipient.phone, personalizedMessage);
+          if (success) {
+            successCount++;
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === recipient.id ? { ...item, status: 'sent' } : item
+            ));
+            recipientDetails[i].status = 'sent';
+          } else {
+            failedCount++;
+            failedAgainDetails.push(recipient);
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === recipient.id ? { ...item, status: 'failed', error: 'Gagal mengirim' } : item
+            ));
+            recipientDetails[i].status = 'failed';
+          }
+
+          if (i < history.failedRecipients.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, sendDelayMs));
+          }
+        } catch (err) {
+          console.error(`Error resend to ${recipient.name}:`, err);
+          failedCount++;
+          failedAgainDetails.push(recipient);
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === recipient.id ? { ...item, status: 'failed', error: 'Exception saat mengirim' } : item
+          ));
+          recipientDetails[i].status = 'failed';
+        }
+      }
+
+      // Update riwayat pending menjadi final
+      setMessageHistory(prev => prev
+        .map(h =>
+          h.id === historyId
+            ? {
+                ...h,
+                sentAt: new Date(),
+                status: failedCount === 0 ? 'sent' : failedCount === history.failedRecipients!.length ? 'failed' : 'sent',
+                failedRecipients: failedAgainDetails,
+                recipientDetails
+              }
+            : h
+        )
+        .slice(0, 200)
+      );
+
+      if (successCount > 0) {
+        toast({ title: 'Berhasil', description: `Berhasil kirim ulang ${successCount} pesan${failedCount > 0 ? `, ${failedCount} gagal` : ''}` });
+      }
+      if (failedCount > 0) {
+        toast({ title: 'Error', description: `${failedCount} pesan gagal dikirim ulang`, variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('Error in resend failed:', error);
+      toast({ title: 'Error', description: 'Terjadi kesalahan saat kirim ulang pesan', variant: 'destructive' });
+    } finally {
+      setIsSending(false);
+      setSendingQueue([]);
     }
   };
 
@@ -791,6 +1097,53 @@ const Messages = () => {
         </Card>
       </div>
 
+      {/* Status Pengiriman */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Status Pengiriman</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sendingQueue.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">
+              <Clock className="h-10 w-10 mx-auto mb-2 opacity-50" />
+              <p>Tidak ada proses pengiriman saat ini</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nama</TableHead>
+                  <TableHead>No. WhatsApp</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sendingQueue.map(item => (
+                  <TableRow key={item.id}>
+                    <TableCell className="max-w-xs truncate">{item.name}</TableCell>
+                    <TableCell className="max-w-xs truncate">{item.phone}</TableCell>
+                    <TableCell>
+                      {item.status === 'queued' && (
+                        <Badge className="bg-blue-100 text-blue-800">Dalam Antrian</Badge>
+                      )}
+                      {item.status === 'sending' && (
+                        <Badge className="bg-amber-100 text-amber-800">Sedang Mengirim</Badge>
+                      )}
+                      {item.status === 'sent' && (
+                        <Badge className="bg-green-100 text-green-800">Terkirim</Badge>
+                      )}
+                      {item.status === 'failed' && (
+                        <Badge variant="destructive">Gagal</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Message History */}
       <Card>
         <CardHeader>
@@ -807,24 +1160,111 @@ const Messages = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Tanggal</TableHead>
-                  <TableHead>Penerima</TableHead>
+                  <TableHead>Penerima (Nama)</TableHead>
                   <TableHead>Kriteria</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Gagal</TableHead>
                   <TableHead>Pesan</TableHead>
+                  <TableHead>Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {messageHistory.map((history) => (
                   <TableRow key={history.id}>
                     <TableCell>{history.sentAt.toLocaleString('id-ID')}</TableCell>
-                    <TableCell>{history.recipients} pelanggan</TableCell>
+                    <TableCell>
+                      {history.recipientDetails && history.recipientDetails.length > 0 ? (
+                        <div className="space-y-1">
+                          {(() => {
+                            const first = history.recipientDetails![0];
+                            const sentCount = history.recipientDetails!.filter(r => r.status === 'sent').length;
+                            return (
+                              <>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm truncate">
+                                    {first.name} <span className="text-gray-500">({first.phone})</span>
+                                  </span>
+                                  <span className="ml-2">
+                                    {first.status === 'sent' && <Badge className="bg-green-100 text-green-800">Terkirim</Badge>}
+                                    {first.status === 'failed' && <Badge variant="destructive">Gagal</Badge>}
+                                    {first.status === 'queued' && <Badge className="bg-blue-100 text-blue-800">Antri</Badge>}
+                                    {first.status === 'sending' && <Badge className="bg-amber-100 text-amber-800">Mengirim</Badge>}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">dst. ({sentCount} terkirim)</div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-500">Tidak ada data penerima</span>
+                      )}
+                    </TableCell>
                     <TableCell className="max-w-xs truncate">{history.criteria}</TableCell>
                     <TableCell>
-                      <Badge variant={history.status === 'sent' ? 'default' : 'destructive'}>
-                        {history.status === 'sent' ? 'Terkirim' : 'Gagal'}
-                      </Badge>
+                      {history.status === 'pending' && (
+                        <Badge className="bg-amber-100 text-amber-800">Sedang Mengirim</Badge>
+                      )}
+                      {history.status === 'sent' && (
+                        <Badge>Terkirim</Badge>
+                      )}
+                      {history.status === 'failed' && (
+                        <Badge variant="destructive">Gagal</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {history.failedRecipients?.length ? `${history.failedRecipients.length} gagal` : '0'}
                     </TableCell>
                     <TableCell className="max-w-xs truncate">{history.message}</TableCell>
+                    <TableCell className="space-x-1">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              aria-label="Lihat Seluruh Pelanggan Terkirim"
+                              onClick={() => openRecipientsDialog(history)}
+                            >
+                              <Users className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Lihat seluruh pelanggan terkirim</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              aria-label="Detail Pesan"
+                              onClick={() => openMessageDetail(history)}
+                            >
+                              <FileText className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Detail pesan</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              aria-label="Kirim Ulang Gagal"
+                              onClick={() => handleResendFailed(history)}
+                              disabled={!history.failedRecipients || history.failedRecipients.length === 0 || history.status === 'pending'}
+                            >
+                              <RefreshCcw className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Kirim ulang gagal</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -832,6 +1272,79 @@ const Messages = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Dialog: Detail Pesan */}
+      <Dialog open={messageDetailOpen} onOpenChange={(o) => (o ? setMessageDetailOpen(true) : closeMessageDetail())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Detail Pesan</DialogTitle>
+            <DialogDescription>
+              Lihat isi pesan lengkap beserta kriterianya
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Kriteria</Label>
+              <p className="text-sm text-gray-700 mt-1 break-words">
+                {messageDetailData?.criteria || '-'}
+              </p>
+            </div>
+            <div>
+              <Label>Isi Pesan</Label>
+              <pre className="mt-2 p-3 bg-gray-50 border rounded text-sm whitespace-pre-wrap break-words max-h-[60vh] overflow-auto">
+                {messageDetailData?.message || ''}
+              </pre>
+            </div>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={closeMessageDetail}>Tutup</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Seluruh Penerima */}
+      <Dialog open={recipientsDialogOpen} onOpenChange={(o) => (o ? setRecipientsDialogOpen(true) : closeRecipientsDialog())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Seluruh Pelanggan Penerima</DialogTitle>
+            <DialogDescription>
+              Daftar seluruh penerima dan status pengirimannya
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-auto">
+            {recipientsDialogData && recipientsDialogData.recipients.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>No. WhatsApp</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recipientsDialogData.recipients.map((r) => (
+                    <TableRow key={`${recipientsDialogData.id}-${r.id}`}>
+                      <TableCell className="max-w-xs truncate">{r.name}</TableCell>
+                      <TableCell className="max-w-xs truncate">{r.phone}</TableCell>
+                      <TableCell>
+                        {r.status === 'sent' && <Badge className="bg-green-100 text-green-800">Terkirim</Badge>}
+                        {r.status === 'failed' && <Badge variant="destructive">Gagal</Badge>}
+                        {r.status === 'queued' && <Badge className="bg-blue-100 text-blue-800">Antri</Badge>}
+                        {r.status === 'sending' && <Badge className="bg-amber-100 text-amber-800">Mengirim</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-6 text-gray-500">Tidak ada data penerima</div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={closeRecipientsDialog}>Tutup</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* WAHA Settings Dialog */}
       <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
@@ -927,71 +1440,59 @@ const Messages = () => {
           <form onSubmit={handleSendMessage} className="space-y-4">
             {/* Criteria Selection */}
             <div className="grid grid-cols-2 gap-4">
+              
+              
+              
+              
+              
+              
+              
+              
               <div>
-                <Label htmlFor="area">AREA / WILAYAH</Label>
-                <Select value={broadcastData.area} onValueChange={(value) => handleInputChange('area', value)}>
+                <Label htmlFor="areaFilter">WILAYAH</Label>
+                <Select value={broadcastData.area || 'all'} onValueChange={(value) => handleInputChange('area', value)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih Area" />
+                    <SelectValue placeholder="Pilih Wilayah" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Semua Area</SelectItem>
-                    {areas?.map((area) => (
-                      <SelectItem key={area.id} value={area.name}>
-                        {area.name}
-                      </SelectItem>
+                    <SelectItem value="all">Semua</SelectItem>
+                    {(areas || []).map((a) => (
+                      <SelectItem key={a.id || a.name} value={a.name}>{a.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               
               <div>
-                <Label htmlFor="billingType">TIPE PENAGIHAN</Label>
-                <Select value={broadcastData.billingType} onValueChange={(value) => handleInputChange('billingType', value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih Tipe" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Semua Tipe</SelectItem>
-                    <SelectItem value="prepaid">Prabayar</SelectItem>
-                    <SelectItem value="postpaid">Pascabayar</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div>
-                <Label htmlFor="package">PAKET</Label>
-                <Select value={broadcastData.package} onValueChange={(value) => handleInputChange('package', value)}>
+                <Label htmlFor="packageFilter">PAKET</Label>
+                <Select value={broadcastData.package || 'all'} onValueChange={(value) => handleInputChange('package', value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih Paket" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Semua Paket</SelectItem>
-                    {packages?.map((pkg) => (
-                      <SelectItem key={pkg.id} value={pkg.name}>
-                        {pkg.name} - {pkg.speed}
-                      </SelectItem>
+                    <SelectItem value="all">Semua</SelectItem>
+                    {(packages || []).map((p) => (
+                      <SelectItem key={p.id || p.name} value={p.name}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div>
-                <Label htmlFor="odp">ODP</Label>
-                <Select value={broadcastData.odp} onValueChange={(value) => handleInputChange('odp', value)}>
+                <Label htmlFor="odpFilter">ODP</Label>
+                <Select value={broadcastData.odp || 'all'} onValueChange={(value) => handleInputChange('odp', value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih ODP" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Semua ODP</SelectItem>
-                    {odps?.map((odp) => (
-                      <SelectItem key={odp.id} value={odp.name}>
-                        {odp.name} - {odp.area}
-                      </SelectItem>
+                    <SelectItem value="all">Semua</SelectItem>
+                    {(odp || []).map((o) => (
+                      <SelectItem key={o.id || o.name} value={o.name}>{o.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div>
                 <Label htmlFor="paymentStatus">STATUS PEMBAYARAN</Label>
                 <Select value={broadcastData.paymentStatus} onValueChange={(value) => handleInputChange('paymentStatus', value)}>
@@ -1032,11 +1533,8 @@ const Messages = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Semua</SelectItem>
-                    <SelectItem value="isolated">Sedang Diisolir</SelectItem>
-                    <SelectItem value="not_isolated">Tidak Diisolir</SelectItem>
                     <SelectItem value="suspended">Status Suspended</SelectItem>
                     <SelectItem value="active">Status Active</SelectItem>
-                    <SelectItem value="today">Diisolir Hari Ini</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1045,12 +1543,25 @@ const Messages = () => {
             {/* Send to specific customer */}
             <div>
               <Label htmlFor="sendToCustomer">KIRIM KE PELANGGAN TERTENTU</Label>
-              <Input
-                id="sendToCustomer"
-                value={broadcastData.sendToCustomer}
-                onChange={(e) => handleInputChange('sendToCustomer', e.target.value)}
-                placeholder="Masukkan nama, nomor pelanggan, atau nomor HP"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="sendToCustomer"
+                  value={broadcastData.sendToCustomer}
+                  readOnly
+                  onClick={() => setShowCustomerPicker(true)}
+                  placeholder="Klik untuk memilih pelanggan"
+                />
+                {broadcastData.sendToCustomer && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleInputChange('sendToCustomer', '')}
+                  >
+                    Hapus
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Klik kolom untuk membuka daftar pelanggan</p>
             </div>
             
             {/* Message with Template Management */}
@@ -1169,6 +1680,79 @@ const Messages = () => {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer Picker Dialog */}
+      <Dialog open={showCustomerPicker} onOpenChange={setShowCustomerPicker}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pilih Pelanggan</DialogTitle>
+            <DialogDescription>
+              Ketik untuk mencari cepat, lalu klik baris untuk memilih
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder="Cari nama, nomor pelanggan, nomor HP, alamat, area atau paket"
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+            />
+            <div className="border rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>No. Pelanggan</TableHead>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>HP</TableHead>
+                    <TableHead>Paket</TableHead>
+                    <TableHead>Area</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(customers || [])
+                    .filter((c) => {
+                      const term = customerSearch.trim().toLowerCase();
+                      if (!term) return true;
+                      const phoneDigits = (c.phone || '').replace(/[^0-9]/g, '');
+                      const termDigits = term.replace(/[^0-9]/g, '');
+                      return (
+                        c.name.toLowerCase().includes(term) ||
+                        c.customerNumber.toLowerCase().includes(term) ||
+                        phoneDigits.includes(termDigits) ||
+                        (c.address && c.address.toLowerCase().includes(term)) ||
+                        (c.area && c.area.toLowerCase().includes(term)) ||
+                        (c.package && c.package.toLowerCase().includes(term))
+                      );
+                    })
+                    .map((c) => (
+                      <TableRow
+                        key={c.id || c.customerNumber}
+                        className="cursor-pointer hover:bg-gray-50"
+                        onClick={() => {
+                          // Set ke nomor pelanggan agar pencarian tepat dan unik
+                          handleInputChange('sendToCustomer', c.customerNumber);
+                          setShowCustomerPicker(false);
+                        }}
+                      >
+                        <TableCell className="font-mono text-xs">{c.customerNumber}</TableCell>
+                        <TableCell>{c.name}</TableCell>
+                        <TableCell>{c.phone}</TableCell>
+                        <TableCell>{c.package}</TableCell>
+                        <TableCell>{c.area}</TableCell>
+                        <TableCell>
+                          {c.status === 'suspended' ? 'Suspended' : 'Active'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="outline" onClick={() => setShowCustomerPicker(false)}>Tutup</Button>
+          </div>
         </DialogContent>
       </Dialog>
 

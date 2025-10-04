@@ -685,7 +685,7 @@ app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
         disabled: secret.disabled === 'true'
       }));
       
-      res.json(formattedSecrets);
+      res.json({ success: true, data: formattedSecrets });
       
     } catch (mikrotikError: any) {
       console.error('MikroTik connection error:', mikrotikError);
@@ -708,7 +708,7 @@ app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
         { name: 'user2', profile: 'standard-25mbps', service: 'pppoe', comment: 'Mock data', disabled: false },
         { name: 'user3', profile: 'premium-50mbps', service: 'pppoe', comment: 'Mock data', disabled: false }
       ];
-      res.json(mockSecrets);
+      res.json({ success: true, data: mockSecrets, message: errorMessage });
     }
   } catch (error: any) {
     console.error('Error fetching PPP secrets:', error);
