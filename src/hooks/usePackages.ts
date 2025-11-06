@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Package } from '@/types/isp';
 import { api } from '@/utils/api';
+import axios from 'axios';
 import { toast } from 'sonner';
 
 export const usePackages = () => {
@@ -50,7 +51,9 @@ export const usePackages = () => {
         throw new Error(response.message || 'Failed to fetch packages');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      const errorMessage = (axios.isAxiosError(err) && err.response?.data?.message)
+        ? err.response.data.message
+        : (err instanceof Error ? err.message : 'Unknown error occurred');
       setError(errorMessage);
       toast.error(`Failed to load packages: ${errorMessage}`);
     } finally {
@@ -70,7 +73,9 @@ export const usePackages = () => {
         throw new Error(response.message || 'Failed to create package');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      const errorMessage = (axios.isAxiosError(err) && err.response?.data?.message)
+        ? err.response.data.message
+        : (err instanceof Error ? err.message : 'Unknown error occurred');
       toast.error(`Failed to add package: ${errorMessage}`);
       throw err;
     }
@@ -88,7 +93,9 @@ export const usePackages = () => {
         throw new Error(response.message || 'Failed to update package');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      const errorMessage = (axios.isAxiosError(err) && err.response?.data?.message)
+        ? err.response.data.message
+        : (err instanceof Error ? err.message : 'Unknown error occurred');
       toast.error(`Failed to update package: ${errorMessage}`);
       throw err;
     }
@@ -105,7 +112,9 @@ export const usePackages = () => {
         throw new Error(response.message || 'Failed to delete package');
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      const errorMessage = (axios.isAxiosError(err) && err.response?.data?.message)
+        ? err.response.data.message
+        : (err instanceof Error ? err.message : 'Unknown error occurred');
       toast.error(`Failed to delete package: ${errorMessage}`);
       throw err;
     }

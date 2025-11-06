@@ -716,6 +716,48 @@ app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
   }
 });
 
+// Create PPP secret on router
+app.post('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
+  try {
+    const router = await db.Router.findByPk(req.params.id);
+    if (!router) {
+      return res.status(404).json({ success: false, message: 'Router not found' });
+    }
+
+    const { name, password, profile, service, comment } = req.body;
+    if (!name || !password) {
+      return res.status(400).json({ success: false, message: 'name dan password wajib diisi' });
+    }
+
+    const mikrotikAPI = require('../utils/mikrotik');
+    const result = await mikrotikAPI.createPPPSecret(
+      router.name,
+      name,
+      password,
+      profile,
+      service || 'pppoe',
+      comment || ''
+    );
+
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: result.message || 'PPP Secret dibuat',
+        data: { name, profile: profile || null, service: service || 'pppoe' }
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: result.message || 'Gagal membuat PPP Secret',
+      error: result.error
+    });
+  } catch (error: any) {
+    console.error('Error creating PPP secret:', error);
+    return res.status(500).json({ success: false, message: 'Error creating PPP secret', error: error.message });
+  }
+});
+
 // Disable PPP user for a customer
 app.post('/api/mikrotik/ppp/disable/:customerId', async (req: Request, res: Response) => {
   try {
@@ -1080,8 +1122,9 @@ app.delete('/api/odps/:id', async (req: Request, res: Response) => {
       });
     }
     
-    // Cek apakah ODP masih digunakan oleh customer
-    const customerCount = await db.Customer.count({ where: { odpSlot: id } });
+    // Cek apakah ODP masih digunakan oleh customer (gunakan relasi odpId, bukan odpSlot)
+    const odpIdNum = parseInt(id as string, 10);
+    const customerCount = await db.Customer.count({ where: { odpId: odpIdNum } });
     if (customerCount > 0) {
       return res.status(400).json({
         success: false,
@@ -1392,8 +1435,9 @@ app.put('/api/packages/:id', async (req: Request, res: Response) => {
 app.delete('/api/packages/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const pkgId = parseInt(id as string, 10);
     
-    const pkg = await db.Package.findByPk(id);
+    const pkg = await db.Package.findByPk(pkgId);
     if (!pkg) {
       return res.status(404).json({
         success: false,
@@ -1402,8 +1446,8 @@ app.delete('/api/packages/:id', async (req: Request, res: Response) => {
       });
     }
     
-    // Cek apakah paket masih digunakan oleh customer
-    const customerCount = await db.Customer.count({ where: { packageId: id } });
+    // Cek apakah paket masih digunakan oleh customer (menggunakan nama paket di kolom `package`)
+    const customerCount = await db.Customer.count({ where: { package: pkg.name } });
     if (customerCount > 0) {
       return res.status(400).json({
         success: false,
@@ -1566,6 +1610,60 @@ app.post('/api/customers', async (req: Request, res: Response) => {
       });
     }
     
+    if (!customerData.area || !customerData.area.trim()) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Area harus dipilih'
+      });
+    }
+    
+    if (!customerData.package || !customerData.package.trim()) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Paket harus dipilih'
+      });
+    }
+    
+    if (!customerData.packagePrice || customerData.packagePrice <= 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Harga paket harus diisi dan lebih dari 0'
+      });
+    }
+    
+    if (!customerData.activeDate) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Tanggal aktif harus diisi'
+      });
+    }
+    
+    if (!customerData.expireDate) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Tanggal expire harus diisi'
+      });
+    }
+    
+    if (!customerData.paymentDueDate) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: 'Tanggal jatuh tempo pembayaran harus diisi'
+      });
+    }
+    
     // Handle ODP slot allocation
     if (customerData.odpId) {
       // Pastikan odpId dikonversi ke integer
@@ -1632,9 +1730,24 @@ app.post('/api/customers', async (req: Request, res: Response) => {
       }
     }
     
-    // Generate customer number
-    const count = await db.Customer.count({ transaction });
-    processedData.customerNumber = 'LTS' + (count + 1).toString().padStart(4, '0');
+    // Generate customer number (collision-safe)
+    let generatedNumber: string | null = null;
+    for (let i = 0; i < 5; i++) {
+      const base = Date.now().toString().slice(-8);
+      const rand = Math.floor(Math.random() * 90) + 10; // 2-digit random
+      const candidate = `LTS${base}${rand}`;
+      const exists = await db.Customer.findOne({ where: { customerNumber: candidate }, transaction });
+      if (!exists) {
+        generatedNumber = candidate;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    if (!generatedNumber) {
+      const count = await db.Customer.count({ transaction });
+      generatedNumber = 'LTS' + (count + 1).toString().padStart(4, '0');
+    }
+    processedData.customerNumber = generatedNumber;
     
     const customer = await db.Customer.create(processedData, { transaction });
     

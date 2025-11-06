@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "nodemon src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "import:customers": "node scripts/import_customers.js"
   },
   "keywords": [],
   "author": "",
@@ -27,7 +28,8 @@
     "mysql2": "^3.14.1",
     "node-cron": "^3.0.3",
     "node-routeros": "^1.6.9",
-    "sequelize": "^6.37.7"
+    "sequelize": "^6.37.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

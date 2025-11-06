@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Send, Users, MessageSquare, Clock, Settings, FileText, Trash2, Edit, RefreshCcw } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useAreas } from '@/hooks/useAreas';
 import { usePackages } from '@/hooks/usePackages';
@@ -17,6 +18,7 @@ import { useODP } from '@/hooks/useODP';
 import { Customer } from '@/types/isp';
 import { useToast } from '@/hooks/use-toast';
 import { useWahaConfig } from '../hooks/useWahaConfig';
+import { useAppSetting } from '@/hooks/useAppSetting';
 
 interface MessageHistory {
   id: string;
@@ -60,6 +62,8 @@ const Messages = () => {
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showAddTemplateDialog, setShowAddTemplateDialog] = useState(false);
   const [messageHistory, setMessageHistory] = useState<MessageHistory[]>([]);
+  const { setting: serverMessageHistory = [], isLoading: historyLoading, saveSetting: saveServerMessageHistory } = useAppSetting<MessageHistory[]>('messageHistory', []);
+  const historyInitializedRef = useRef(false);
   const [messageTemplates, setMessageTemplates] = useState<MessageTemplate[]>([]);
   const [isSending, setIsSending] = useState(false);
   // Jeda antar pesan (default 5 detik)
@@ -123,33 +127,35 @@ const Messages = () => {
     }
   }, [config]);
 
-  // Load message history dari localStorage
+  // Load message history dari server
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('messageHistory');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const restored: MessageHistory[] = (parsed || []).map((h: any) => ({
+      if (serverMessageHistory && Array.isArray(serverMessageHistory)) {
+        const restored: MessageHistory[] = (serverMessageHistory || []).map((h: any) => ({
           ...h,
           sentAt: h.sentAt ? new Date(h.sentAt) : new Date()
         }));
         setMessageHistory(restored.slice(0, 200));
       }
     } catch (e) {
-      console.error('Error loading message history:', e);
+      console.error('Error loading message history from server:', e);
     }
-  }, []);
+  }, [serverMessageHistory]);
 
-  // Persist message history ke localStorage saat berubah
+  // Persist message history ke server saat berubah (skip pertama kali)
   useEffect(() => {
     try {
+      if (!historyInitializedRef.current) {
+        historyInitializedRef.current = true;
+        return;
+      }
       const serializable = messageHistory.map(h => ({
         ...h,
         sentAt: h.sentAt instanceof Date ? h.sentAt.toISOString() : h.sentAt
       }));
-      localStorage.setItem('messageHistory', JSON.stringify(serializable));
+      saveServerMessageHistory.mutate(serializable);
     } catch (e) {
-      console.error('Error saving message history:', e);
+      console.error('Error saving message history to server:', e);
     }
   }, [messageHistory]);
 
@@ -158,11 +164,30 @@ const Messages = () => {
     const savedTemplates = localStorage.getItem('messageTemplates');
     if (savedTemplates) {
       try {
-        const templates = JSON.parse(savedTemplates);
-        setMessageTemplates(templates.map((t: any) => ({
+        const parsed: any[] = JSON.parse(savedTemplates);
+        let templates: MessageTemplate[] = parsed.map((t: any) => ({
           ...t,
           createdAt: new Date(t.createdAt)
-        })));
+        }));
+
+        // Ensure enhanced Reminder Pembayaran template exists
+        const hasEnhancedReminder = templates.some(
+          (t) => t.category === 'payment' && typeof t.content === 'string' && t.content.includes('📅 Tanggal Aktif') && t.content.includes('BNI 46')
+        );
+
+        if (!hasEnhancedReminder) {
+          const newTemplate: MessageTemplate = {
+            id: String(Date.now()),
+            name: 'Reminder Pembayaran (Lengkap)',
+            category: 'payment',
+            content: `Reminder Pembayaran Tagihan\n\nYth. [NAMA] - [AREA],\n\nTagihan internet Anda untuk bulan ini akan jatuh tempo. Mohon segera lakukan pembayaran sebelum tanggal 5, agar layanan tetap aktif.\n\n📋 No. Pelanggan: [NOPEL]\n📦 Paket: [PAKET]\n💰 Harga: Rp [HARGA]\n📅 Tanggal Aktif: [ACTIVE_DATE]\n📅 Tanggal Kadaluarsa: [EXPIRE_DATE]\n\nPembayaran dapat dilakukan melalui\n\nBRI: 557501007609530 an DARWIS ASYUR\nBNI 46: 0285411186 an DARWIS ASYUR\natau Agent Terdekat\n\nTerima kasih atas perhatiannya.`,
+            createdAt: new Date()
+          };
+          templates = [...templates, newTemplate];
+          localStorage.setItem('messageTemplates', JSON.stringify(templates));
+        }
+
+        setMessageTemplates(templates);
       } catch (error) {
         console.error('Error loading message templates:', error);
       }
@@ -180,7 +205,7 @@ const Messages = () => {
           id: '2',
           name: 'Reminder Pembayaran',
           category: 'payment',
-          content: `Reminder Pembayaran Tagihan\n\nYth. [NAMA],\n\nTagihan internet Anda untuk bulan ini akan jatuh tempo. Mohon segera lakukan pembayaran.\n\nNo. Pelanggan: [NOPEL]\nPaket: [PAKET]\nArea: [AREA]\n\nTerima kasih atas perhatiannya.`,
+          content: `Reminder Pembayaran Tagihan\n\nYth. [NAMA] - [AREA],\n\nTagihan internet Anda untuk bulan ini akan jatuh tempo. Mohon segera lakukan pembayaran sebelum tanggal 5, agar layanan tetap aktif.\n\n📋 No. Pelanggan: [NOPEL]\n📦 Paket: [PAKET]\n💰 Harga: Rp [HARGA]\n📅 Tanggal Aktif: [ACTIVE_DATE]\n📅 Tanggal Kadaluarsa: [EXPIRE_DATE]\n\nPembayaran dapat dilakukan melalui\n\nBRI: 557501007609530 an DARWIS ASYUR\nBNI 46: 0285411186 an DARWIS ASYUR\natau Agent Terdekat\n\nTerima kasih atas perhatiannya.`,
           createdAt: new Date()
         }
       ];
@@ -554,13 +579,41 @@ const Messages = () => {
 
   // Replace message placeholders
   const replaceMessagePlaceholders = (message: string, customer: Customer): string => {
+    const price = Number(customer.packagePrice || 0);
+    const activeDateStr = customer.activeDate
+      ? (() => {
+          const d = new Date(customer.activeDate);
+          return isNaN(d.getTime()) ? String(customer.activeDate) : d.toLocaleDateString('id-ID');
+        })()
+      : '';
+    const expireDateStr = customer.expireDate
+      ? (() => {
+          const d = new Date(customer.expireDate);
+          return isNaN(d.getTime()) ? String(customer.expireDate) : d.toLocaleDateString('id-ID');
+        })()
+      : '';
+
     return message
-      .replace(/\[NOPEL\]/g, customer.customerNumber)
-      .replace(/\[NAMA\]/g, customer.name)
-      .replace(/\[PAKET\]/g, customer.package)
-      .replace(/\[AREA\]/g, customer.area)
-      .replace(/\[PHONE\]/g, customer.phone)
-      .replace(/\[ADDRESS\]/g, customer.address || '');
+      // Bracket-style placeholders
+      .replace(/\[NOPEL\]/gi, customer.customerNumber || '')
+      .replace(/\[NAMA\]/gi, customer.name || '')
+      .replace(/\[PAKET\]/gi, customer.package || '')
+      .replace(/\[AREA\]/gi, customer.area || '')
+      .replace(/\[PHONE\]/gi, customer.phone || '')
+      .replace(/\[ADDRESS\]/gi, customer.address || '')
+      .replace(/\[PRICE\]/gi, price.toLocaleString('id-ID'))
+      .replace(/\[ACTIVE_DATE\]/gi, activeDateStr)
+      .replace(/\[EXPIRE_DATE\]/gi, expireDateStr)
+      .replace(/\[HARGA\]/gi, price.toLocaleString('id-ID'))
+
+      // Curly-brace placeholders (konsisten dengan CustomerForm/Customers)
+      .replace(/\{customerNumber\}/gi, customer.customerNumber || '')
+      .replace(/\{customerName\}/gi, customer.name || '')
+      .replace(/\{packageName\}/gi, customer.package || '')
+      .replace(/\{packagePrice\}/gi, price.toLocaleString('id-ID'))
+      .replace(/\{area\}/gi, customer.area || '')
+      .replace(/\{activeDate\}/gi, activeDateStr)
+      .replace(/\{expireDate\}/gi, expireDateStr);
   };
 
   // Send message via WAHA API
@@ -996,10 +1049,6 @@ const Messages = () => {
     try {
       console.log('Saving WAHA config:', formConfig);
       await updateConfig.mutateAsync(formConfig);
-      
-      // Pastikan localStorage juga terupdate
-      localStorage.setItem('wahaConfig', JSON.stringify(formConfig));
-      
       toast({
         title: "Berhasil",
         description: "Konfigurasi WAHA berhasil disimpan!"
@@ -1033,50 +1082,58 @@ const Messages = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Pesan WhatsApp</h1>
-          <p className="text-gray-600">Kirim pesan broadcast ke pelanggan melalui WhatsApp</p>
+          <h1 className="text-xl md:text-3xl font-bold text-gray-900">Pesan WhatsApp</h1>
+          <p className="text-sm md:text-base text-gray-600">Kirim pesan broadcast ke pelanggan</p>
         </div>
-        <div className="flex space-x-2">
+        <div className="flex flex-wrap gap-2">
           <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
             <DialogTrigger asChild>
-              <Button variant="outline">
-                <Settings className="h-4 w-4 mr-2" />
-                Pengaturan WAHA
+              <Button 
+                variant="outline"
+                size="sm"
+                className="text-xs md:text-sm px-2 py-1 md:px-3 md:py-2"
+              >
+                <Settings className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                Setting WAHA
               </Button>
             </DialogTrigger>
           </Dialog>
-          <Button onClick={() => setShowBroadcastForm(true)} className="bg-green-600 hover:bg-green-700">
-            <Send className="h-4 w-4 mr-2" />
+          <Button 
+            onClick={() => setShowBroadcastForm(true)} 
+            className="bg-green-600 hover:bg-green-700 text-xs md:text-sm px-2 py-1 md:px-4 md:py-2"
+            size="sm"
+          >
+            <Send className="h-3 w-3 md:h-4 md:w-4 mr-1" />
             Kirim Pesan
           </Button>
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-3 md:p-6">
             <div className="flex items-center">
-              <Users className="h-8 w-8 text-blue-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Pelanggan</p>
-                <p className="text-2xl font-bold text-gray-900">{customers?.length || 0}</p>
+              <Users className="h-6 w-6 md:h-8 md:w-8 text-blue-600" />
+              <div className="ml-3 md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-600">Total Pelanggan</p>
+                <p className="text-lg md:text-2xl font-bold text-gray-900">{customers?.length || 0}</p>
               </div>
             </div>
           </CardContent>
         </Card>
         
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-3 md:p-6">
             <div className="flex items-center">
-              <MessageSquare className="h-8 w-8 text-green-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Pesan Terkirim</p>
-                <p className="text-2xl font-bold text-gray-900">
+              <MessageSquare className="h-6 w-6 md:h-8 md:w-8 text-green-600" />
+              <div className="ml-3 md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-600">Pesan Terkirim</p>
+                <p className="text-lg md:text-2xl font-bold text-gray-900">
                   {messageHistory.filter(h => h.status === 'sent').reduce((sum, h) => sum + h.recipients, 0)}
                 </p>
               </div>
@@ -1085,12 +1142,12 @@ const Messages = () => {
         </Card>
         
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-3 md:p-6">
             <div className="flex items-center">
-              <FileText className="h-8 w-8 text-purple-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Template Tersimpan</p>
-                <p className="text-2xl font-bold text-gray-900">{messageTemplates.length}</p>
+              <FileText className="h-6 w-6 md:h-8 md:w-8 text-purple-600" />
+              <div className="ml-3 md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-600">Template Tersimpan</p>
+                <p className="text-lg md:text-2xl font-bold text-gray-900">{messageTemplates.length}</p>
               </div>
             </div>
           </CardContent>
@@ -1547,10 +1604,16 @@ const Messages = () => {
                 <Input
                   id="sendToCustomer"
                   value={broadcastData.sendToCustomer}
-                  readOnly
-                  onClick={() => setShowCustomerPicker(true)}
-                  placeholder="Klik untuk memilih pelanggan"
+                  onChange={(e) => handleInputChange('sendToCustomer', e.target.value)}
+                  placeholder="Ketik nama/nomor/HP/alamat atau klik Pilih"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowCustomerPicker(true)}
+                >
+                  Pilih
+                </Button>
                 {broadcastData.sendToCustomer && (
                   <Button
                     type="button"
@@ -1561,7 +1624,7 @@ const Messages = () => {
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-gray-500 mt-1">Klik kolom untuk membuka daftar pelanggan</p>
+              <p className="text-xs text-gray-500 mt-1">Ketik untuk mencari cepat, atau klik tombol Pilih untuk membuka daftar pelanggan</p>
             </div>
             
             {/* Message with Template Management */}
@@ -1599,7 +1662,23 @@ const Messages = () => {
                 id="message"
                 value={broadcastData.message}
                 onChange={(e) => handleInputChange('message', e.target.value)}
-                placeholder="Tulis pesan Anda di sini...\n\nGunakan placeholder:\n[NAMA] - Nama pelanggan\n[NOPEL] - Nomor pelanggan\n[PAKET] - Paket internet\n[AREA] - Area pelanggan\n[PHONE] - Nomor HP\n[ADDRESS] - Alamat"
+                placeholder={
+                  `Tulis pesan Anda di sini...
+
+Gunakan placeholder:
+[NAMA] - Nama pelanggan
+[NOPEL] - Nomor pelanggan
+[PAKET] - Paket internet
+[AREA] - Area pelanggan
+[PHONE] - Nomor HP
+[ADDRESS] - Alamat
+[PRICE] atau [HARGA] - Harga paket
+[ACTIVE_DATE] - Tanggal aktif
+[EXPIRE_DATE] - Tanggal kadaluarsa
+
+Alternatif (gaya kurung kurawal):
+{customerName}, {customerNumber}, {packageName}, {packagePrice}, {area}, {activeDate}, {expireDate}`
+                }
                 rows={8}
                 className="resize-none"
               />
@@ -1649,6 +1728,17 @@ const Messages = () => {
                   </div>
                 </div>
               )}
+
+              {/* Preview Pesan (contoh dari pelanggan pertama) */}
+              {filteredCustomers.length > 0 && (
+                <div className="mt-4">
+                  <h5 className="font-medium text-gray-800 mb-1">Preview Pesan:</h5>
+                  <pre className="mt-1 p-3 bg-white border rounded text-sm whitespace-pre-wrap break-words">
+                    {replaceMessagePlaceholders(broadcastData.message, filteredCustomers[0])}
+                  </pre>
+                  <p className="text-xs text-gray-500 mt-1">Preview diambil dari pelanggan pertama pada daftar penerima.</p>
+                </div>
+              )}
             </div>
             
             {/* Actions */}
@@ -1693,62 +1783,35 @@ const Messages = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Input
-              placeholder="Cari nama, nomor pelanggan, nomor HP, alamat, area atau paket"
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-            />
-            <div className="border rounded-md overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>No. Pelanggan</TableHead>
-                    <TableHead>Nama</TableHead>
-                    <TableHead>HP</TableHead>
-                    <TableHead>Paket</TableHead>
-                    <TableHead>Area</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(customers || [])
-                    .filter((c) => {
-                      const term = customerSearch.trim().toLowerCase();
-                      if (!term) return true;
-                      const phoneDigits = (c.phone || '').replace(/[^0-9]/g, '');
-                      const termDigits = term.replace(/[^0-9]/g, '');
-                      return (
-                        c.name.toLowerCase().includes(term) ||
-                        c.customerNumber.toLowerCase().includes(term) ||
-                        phoneDigits.includes(termDigits) ||
-                        (c.address && c.address.toLowerCase().includes(term)) ||
-                        (c.area && c.area.toLowerCase().includes(term)) ||
-                        (c.package && c.package.toLowerCase().includes(term))
-                      );
-                    })
-                    .map((c) => (
-                      <TableRow
-                        key={c.id || c.customerNumber}
-                        className="cursor-pointer hover:bg-gray-50"
-                        onClick={() => {
-                          // Set ke nomor pelanggan agar pencarian tepat dan unik
-                          handleInputChange('sendToCustomer', c.customerNumber);
-                          setShowCustomerPicker(false);
-                        }}
-                      >
-                        <TableCell className="font-mono text-xs">{c.customerNumber}</TableCell>
-                        <TableCell>{c.name}</TableCell>
-                        <TableCell>{c.phone}</TableCell>
-                        <TableCell>{c.package}</TableCell>
-                        <TableCell>{c.area}</TableCell>
-                        <TableCell>
-                          {c.status === 'suspended' ? 'Suspended' : 'Active'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            </div>
+            <Command>
+              <CommandInput
+                placeholder="Ketik untuk cari nama/nomor/HP/alamat/area/paket"
+                value={customerSearch}
+                onValueChange={setCustomerSearch}
+                autoFocus
+              />
+              <CommandList>
+                <CommandEmpty>Tidak ada pelanggan yang cocok</CommandEmpty>
+                <CommandGroup heading="Pelanggan">
+                  {(customers || []).map((c) => (
+                    <CommandItem
+                      key={c.id || c.customerNumber}
+                      value={`${c.name} ${c.customerNumber} ${(c.phone || '').replace(/[^0-9]/g, '')} ${c.address || ''} ${c.area || ''} ${c.package || ''}`}
+                      onSelect={() => {
+                        handleInputChange('sendToCustomer', c.customerNumber);
+                        setShowCustomerPicker(false);
+                      }}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{c.name} <span className="text-xs text-gray-500">({c.customerNumber})</span></span>
+                        <span className="text-xs text-gray-500">HP: {c.phone} • Paket: {c.package} • Area: {c.area}</span>
+                        {c.address && (<span className="text-xs text-gray-400">{c.address}</span>)}
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
           </div>
           <div className="flex justify-end gap-2 mt-3">
             <Button variant="outline" onClick={() => setShowCustomerPicker(false)}>Tutup</Button>

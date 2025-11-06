@@ -27,12 +27,13 @@ interface WhatsAppSettings {
 
 // Tambahkan import
 import { useWahaConfig } from '@/hooks/useWahaConfig';
+import { useAppSetting } from '@/hooks/useAppSetting';
 
 const Customers = () => {
   const { customers, loading, addCustomer, updateCustomer, deleteCustomer } = useCustomers();
   const { areas } = useAreas();
   const { routers } = useRouters();
-  const { odp } = useODP();
+  const { odp, refreshODPs } = useODP();
   const { packages } = usePackages();
   
   // Tambahkan hook ini
@@ -51,6 +52,7 @@ const Customers = () => {
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isBulkChecking, setIsBulkChecking] = useState(false);
 
   // WhatsApp settings
   const [waSettings, setWaSettings] = useState<WhatsAppSettings>({
@@ -74,23 +76,43 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
     enabled: true
   });
 
-  // Load WhatsApp settings from localStorage
+  // Server-persisted WhatsApp settings
+  const { setting: serverWaSettings, saveSetting: saveCustomerWaSetting } = useAppSetting<WhatsAppSettings>('customer-whatsapp-settings', {
+    newCustomerMessageTemplate: `Halo {customerName},
+
+Selamat! Layanan internet Anda telah aktif.
+
+Detail Pelanggan:
+📋 No. Pelanggan: {customerNumber}
+📦 Paket: {packageName}
+💰 Harga: Rp {packagePrice}
+📍 Area: {area}
+📅 Tanggal Aktif: {activeDate}
+📅 Tanggal Kadaluarsa: {expireDate}
+
+Silahkan lakukan pembayaran setiap tanggal 1-5 setiap bulannya.
+
+Untuk informasi lebih lanjut, hubungi customer service kami.
+
+Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
+    enabled: true
+  });
+
   useEffect(() => {
-    const savedSettings = localStorage.getItem('customer-whatsapp-settings');
-    if (savedSettings) {
-      try {
-        setWaSettings(JSON.parse(savedSettings));
-      } catch (error) {
-        console.error('Failed to parse customer WhatsApp settings:', error);
-      }
+    if (serverWaSettings) {
+      setWaSettings(serverWaSettings);
     }
-  }, []);
+  }, [serverWaSettings]);
 
   // Save WhatsApp settings
-  const saveWhatsAppSettings = () => {
-    localStorage.setItem('customer-whatsapp-settings', JSON.stringify(waSettings));
-    setShowSettingsDialog(false);
-    toast.success('Pengaturan WhatsApp berhasil disimpan');
+  const saveWhatsAppSettings = async () => {
+    try {
+      await saveCustomerWaSetting.mutateAsync(waSettings);
+      setShowSettingsDialog(false);
+      toast.success('Pengaturan WhatsApp berhasil disimpan');
+    } catch (e) {
+      toast.error('Gagal menyimpan pengaturan WhatsApp');
+    }
   };
 
   // WhatsApp notification function
@@ -255,6 +277,8 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
     if (window.confirm('Apakah Anda yakin ingin menghapus pelanggan ini?')) {
       try {
         await deleteCustomer(id);
+        // Refresh ODPs agar slot langsung ter-update setelah penghapusan pelanggan
+        await refreshODPs();
       } catch (error) {
         console.error('Error deleting customer:', error);
       }
@@ -435,6 +459,56 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
     return Number.isFinite(n) ? n : 0;
   };
 
+  // Bulk check PPP status for all filtered customers
+  const handleBulkCheckPPP = async () => {
+    if (isBulkChecking) return;
+    setIsBulkChecking(true);
+    try {
+      const total = filteredCustomers.length;
+      if (total === 0) {
+        toast.info('Tidak ada pelanggan pada filter saat ini');
+        return;
+      }
+
+      toast.info(`Memeriksa status PPP untuk ${total} pelanggan...`);
+
+      let active = 0;
+      let disabled = 0;
+      let notFound = 0;
+      let errors = 0;
+
+      for (const c of filteredCustomers) {
+        try {
+          const resp = await api.checkPPPUserStatus(c.id);
+          if (resp.success) {
+            const data: any = resp.data;
+            // Prefer unified shape from backend index.ts: { status, active }
+            const status = data?.status as string | undefined;
+            const isActive = typeof data?.active === 'boolean'
+              ? data.active
+              : (typeof data?.mikrotikStatus?.disabled === 'boolean' ? !data.mikrotikStatus.disabled : false);
+
+            if (status === 'not_found') {
+              notFound++;
+            } else if (isActive) {
+              active++;
+            } else {
+              disabled++;
+            }
+          } else {
+            errors++;
+          }
+        } catch (e) {
+          errors++;
+        }
+      }
+
+      toast.success(`Selesai cek PPP: Active ${active}, Disabled ${disabled}, Not Found ${notFound}, Error ${errors}`);
+    } finally {
+      setIsBulkChecking(false);
+    }
+  };
+
   // HAPUS deklarasi fungsi getCustomerStatus yang duplikat di sini (baris 345-371)
   // Fungsi sudah dideklarasikan di atas sebelum filteredCustomers
 
@@ -449,19 +523,23 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Pelanggan</h1>
-          <p className="text-gray-600">Pengelolaan data pelanggan</p>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Manajemen Pelanggan</h1>
+          <p className="text-sm md:text-base text-gray-600">Kelola data pelanggan ISP</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                <Settings className="h-4 w-4 mr-2" />
-                Setting WhatsApp
-              </Button>
-            </DialogTrigger>
+             <DialogTrigger asChild>
+               <Button 
+                 variant="outline" 
+                 size="sm"
+                 className="text-xs md:text-sm px-2 py-1 md:px-3 md:py-2"
+               >
+                 <Settings className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                 Setting WA
+               </Button>
+             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Pengaturan Pesan WhatsApp Pelanggan Baru</DialogTitle>
@@ -498,12 +576,16 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
             </DialogContent>
           </Dialog>
           <Dialog open={showForm} onOpenChange={setShowForm}>
-            <DialogTrigger asChild>
-              <Button onClick={() => setSelectedCustomer(undefined)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Tambah Pelanggan
-              </Button>
-            </DialogTrigger>
+             <DialogTrigger asChild>
+               <Button 
+                 onClick={() => setSelectedCustomer(undefined)}
+                 size="sm"
+                 className="text-xs md:text-sm px-2 py-1 md:px-3 md:py-2"
+               >
+                 <Plus className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                 Tambah
+               </Button>
+             </DialogTrigger>
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>
@@ -654,6 +736,30 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
 
       {/* Customer Table */}
       <Card>
+        <CardHeader className="py-3">
+          <div className="flex justify-between items-center">
+            <CardTitle>Daftar Pelanggan</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBulkCheckPPP}
+              disabled={isBulkChecking}
+              title="Cek status PPP semua pelanggan pada filter ini"
+            >
+              {isBulkChecking ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Mengecek PPP...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Cek PPP Semua
+                </>
+              )}
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
@@ -750,7 +856,16 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                         <TableCell className="whitespace-nowrap">{customer.billingType || '-'}</TableCell>
                         <TableCell className="font-mono whitespace-nowrap">{customer.pppSecret || '-'}</TableCell>
                         <TableCell className="whitespace-nowrap">
-                          <PPPUserControl customerId={customer.id} />
+                          <PPPUserControl
+                            customerId={customer.id}
+                            initialStatus={customer.mikrotikStatus}
+                            onStatusChange={() => {
+                              try {
+                                // Segarkan daftar pelanggan agar mikrotikStatus terbaru tercermin
+                                refreshCustomers();
+                              } catch {}
+                            }}
+                          />
                         </TableCell>
                       </TableRow>
                     );
@@ -916,3 +1031,4 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
 };
 
 export default Customers;
+

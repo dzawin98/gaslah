@@ -32,19 +32,25 @@ export const useCustomers = () => {
 
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
+      console.log('🔍 useCustomers - Received customerData:', JSON.stringify(customerData, null, 2));
       const response = await api.createCustomer(customerData);
       
       if (response.success && response.data) {
         setCustomers(prev => [...prev, response.data!]);
+        // Inform other parts of the app (e.g., ODP map) to refresh ODP data,
+        // because ODP slot usage may change when a customer is created.
+        try {
+          window.dispatchEvent(new CustomEvent('odpRefresh'));
+        } catch {}
         toast.success('Customer added successfully');
         return response.data;
       } else {
         throw new Error(response.message || 'Failed to add customer');
       }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message || err?.response?.data?.error || err?.message || 'Unknown error occurred';
       toast.error(`Failed to add customer: ${errorMessage}`);
-      throw err;
+      throw new Error(errorMessage);
     }
   };
 
@@ -56,6 +62,11 @@ export const useCustomers = () => {
         setCustomers(prev => prev.map(customer => 
           customer.id === id ? response.data! : customer
         ));
+        // Customer updates can reassign ODPs, affecting slot usage.
+        // Dispatch a refresh event so ODP consumers can refetch.
+        try {
+          window.dispatchEvent(new CustomEvent('odpRefresh'));
+        } catch {}
         toast.success('Pelanggan berhasil diperbarui');
         return response.data;
       } else {
@@ -74,6 +85,10 @@ export const useCustomers = () => {
       
       if (response.success) {
         setCustomers(prev => prev.filter(customer => customer.id !== id));
+        // Deleting a customer may free up an ODP slot; notify listeners.
+        try {
+          window.dispatchEvent(new CustomEvent('odpRefresh'));
+        } catch {}
         toast.success('Pelanggan berhasil dihapus');
       } else {
         throw new Error(response.message || 'Failed to delete customer');

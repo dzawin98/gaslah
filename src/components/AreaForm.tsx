@@ -19,7 +19,9 @@ interface AreaFormProps {
 const AreaForm: React.FC<AreaFormProps> = ({ onClose, onSubmit, area, isEdit = false }) => {
   const [formData, setFormData] = useState({
     name: '',
-    description: ''
+    description: '',
+    coverage: '',
+    status: 'active' as 'active' | 'maintenance' | 'inactive'
   });
 
   // Load area data when editing
@@ -27,7 +29,9 @@ const AreaForm: React.FC<AreaFormProps> = ({ onClose, onSubmit, area, isEdit = f
     if (isEdit && area) {
       setFormData({
         name: area.name || '',
-        description: area.description || ''
+        description: area.description || '',
+        coverage: area.coverage || '',
+        status: (area.status as 'active' | 'maintenance' | 'inactive') || 'active'
       });
     }
   }, [isEdit, area]);
@@ -48,10 +52,17 @@ const AreaForm: React.FC<AreaFormProps> = ({ onClose, onSubmit, area, isEdit = f
       return;
     }
 
+    const payload = {
+      name: formData.name,
+      description: formData.description,
+      coverage: formData.coverage || undefined,
+      status: formData.status
+    };
+
     if (onSubmit) {
-      await onSubmit(formData);
+      await onSubmit(payload);
     } else {
-      console.log('Area form submitted:', formData);
+      console.log('Area form submitted:', payload);
       toast.success(isEdit ? 'Wilayah berhasil diperbarui' : 'Wilayah berhasil ditambahkan');
       onClose();
     }
@@ -102,6 +113,32 @@ const AreaForm: React.FC<AreaFormProps> = ({ onClose, onSubmit, area, isEdit = f
                   placeholder="Masukkan deskripsi wilayah"
                   rows={3}
                 />
+              </div>
+
+              <div>
+                <Label htmlFor="coverage">Cakupan Wilayah</Label>
+                <Input
+                  id="coverage"
+                  name="coverage"
+                  value={formData.coverage}
+                  onChange={handleInputChange}
+                  placeholder="Contoh: Desa A, Desa B, RT 01-05"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="status">Status</Label>
+                <select
+                  id="status"
+                  name="status"
+                  value={formData.status}
+                  onChange={(e) => handleInputChange(e as any)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                >
+                  <option value="active">Active</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="inactive">Inactive</option>
+                </select>
               </div>
 
               <div className="flex justify-end space-x-4 pt-4">

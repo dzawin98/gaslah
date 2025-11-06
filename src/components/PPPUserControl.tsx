@@ -6,13 +6,14 @@ import { toast } from 'sonner';
 
 interface PPPUserControlProps {
   customerId: string;
+  initialStatus?: 'active' | 'disabled';
   onStatusChange?: () => void;
 }
 
-const PPPUserControl: React.FC<PPPUserControlProps> = ({ customerId, onStatusChange }) => {
+const PPPUserControl: React.FC<PPPUserControlProps> = ({ customerId, initialStatus, onStatusChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
-  const [currentStatus, setCurrentStatus] = useState<'active' | 'disabled' | 'unknown'>('unknown');
+  const [currentStatus, setCurrentStatus] = useState<'active' | 'disabled' | 'unknown'>(initialStatus ?? 'unknown');
 
   const handleDisablePPP = async () => {
     if (!customerId) return;
@@ -64,11 +65,14 @@ const PPPUserControl: React.FC<PPPUserControlProps> = ({ customerId, onStatusCha
       const response = await api.checkPPPUserStatus(customerId);
       
       if (response.success) {
-        const mikrotikStatus = response.data.mikrotikStatus;
-        const isDisabled = mikrotikStatus.disabled;
+        const data: any = response.data;
+        const isDisabled = typeof data?.mikrotikStatus?.disabled === 'boolean'
+          ? data.mikrotikStatus.disabled
+          : (typeof data?.active === 'boolean' ? !data.active : false);
+
         setCurrentStatus(isDisabled ? 'disabled' : 'active');
-        
         toast.success(`Status MikroTik: ${isDisabled ? 'Disabled' : 'Active'}`);
+        onStatusChange?.();
       } else {
         toast.error(response.message || 'Gagal memeriksa status PPP user');
       }

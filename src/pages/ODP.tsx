@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Eye, Edit, Trash2, Map, List, Filter } from 'lucide-react';
 import { ODPForm } from '@/components/ODPForm';
@@ -27,7 +27,7 @@ const ODPPage = () => {
   const [deletingODP, setDeletingODP] = useState<ODP | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
   const [selectedArea, setSelectedArea] = useState<string>('all');
-  const { odp, loading, addODP, updateODP, deleteODP } = useODP();
+  const { odp, loading, addODP, updateODP, deleteODP, refreshODPs } = useODP();
   const { areas } = useAreas();
 
   // Filter ODP berdasarkan area yang dipilih
@@ -88,6 +88,7 @@ const ODPPage = () => {
         <ODPForm 
           onClose={() => setShowForm(false)}
           onSubmit={handleAddODP}
+          existingODP={odp}
         />
       </div>
     );
@@ -101,6 +102,7 @@ const ODPPage = () => {
           onClose={() => setEditingODP(null)}
           onSubmit={handleEditODP}
           isEdit={true}
+          existingODP={odp}
         />
       </div>
     );
@@ -113,21 +115,22 @@ const ODPPage = () => {
         <p className="text-gray-600">Pengelolaan data ODP</p>
       </div>
 
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 md:gap-4">
           <Button 
             onClick={() => setShowForm(true)}
             className="bg-blue-600 hover:bg-blue-700"
+            size="sm"
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="h-3 w-3 mr-2 md:h-4 md:w-4" />
             Tambah ODP
           </Button>
           
           {/* Filter Area */}
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-gray-500" />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Filter className="h-3 w-3 md:h-4 md:w-4 text-gray-500" />
             <Select value={selectedArea} onValueChange={setSelectedArea}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-full sm:w-48">
                 <SelectValue placeholder="Filter berdasarkan area" />
               </SelectTrigger>
               <SelectContent>
@@ -142,7 +145,7 @@ const ODPPage = () => {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           <Button
             variant={viewMode === 'table' ? 'default' : 'outline'}
             onClick={() => setViewMode('table')}
@@ -159,25 +162,30 @@ const ODPPage = () => {
             <Map className="h-4 w-4 mr-2" />
             Peta
           </Button>
+
+          {/* Manual refresh */}
+          <Button variant="outline" size="sm" onClick={() => refreshODPs()} title="Refresh ODP">
+            Refresh
+          </Button>
         </div>
       </div>
 
       <Card>
-        <CardContent className={viewMode === 'map' ? 'p-4' : 'p-0'}>
+        <CardContent className={viewMode === 'map' ? 'p-4' : 'p-0 overflow-x-auto'}>
           {viewMode === 'table' ? (
-            <Table>
+            <Table className="min-w-full">
               <TableHeader>
                 <TableRow>
-                  <TableHead>No</TableHead>
-                  <TableHead>Nama ODP</TableHead>
-                  <TableHead>Area</TableHead>
-                  <TableHead>Lokasi</TableHead>
-                  <TableHead>Total Slot</TableHead>
-                  <TableHead>Terpakai</TableHead>
-                  <TableHead>Tersedia</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Koordinat</TableHead>
-                  <TableHead>Act</TableHead>
+                  <TableHead className="whitespace-nowrap">No</TableHead>
+                  <TableHead className="whitespace-nowrap">Nama ODP</TableHead>
+                  <TableHead className="whitespace-nowrap">Area</TableHead>
+                  <TableHead className="hidden md:table-cell whitespace-nowrap">Lokasi</TableHead>
+                  <TableHead className="whitespace-nowrap">Total Slot</TableHead>
+                  <TableHead className="whitespace-nowrap">Terpakai</TableHead>
+                  <TableHead className="whitespace-nowrap">Tersedia</TableHead>
+                  <TableHead className="whitespace-nowrap">Status</TableHead>
+                  <TableHead className="hidden md:table-cell whitespace-nowrap">Koordinat</TableHead>
+                  <TableHead className="whitespace-nowrap">Act</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -196,20 +204,20 @@ const ODPPage = () => {
                 ) : (
                   filteredODP.map((item, index) => (
                     <TableRow key={item.id}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell className="font-medium">{item.name}</TableCell>
-                      <TableCell>{item.area}</TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap text-xs md:text-sm">{index + 1}</TableCell>
+                      <TableCell className="font-medium whitespace-nowrap text-xs md:text-sm">{item.name}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs md:text-sm">{item.area}</TableCell>
+                      <TableCell className="hidden md:table-cell">
                         {item.coordinates ? 
                           `${item.coordinates.latitude.toFixed(6)}, ${item.coordinates.longitude.toFixed(6)}` : 
                           'Koordinat tidak tersedia'
                         }
                       </TableCell>
-                      <TableCell>{item.totalSlots}</TableCell>
-                      <TableCell>{item.usedSlots}</TableCell>
-                      <TableCell>{item.availableSlots}</TableCell>
-                      <TableCell>{getStatusBadge(item.status)}</TableCell>
-                      <TableCell>
+                      <TableCell className="whitespace-nowrap text-xs md:text-sm">{item.totalSlots}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs md:text-sm">{item.usedSlots}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs md:text-sm">{item.availableSlots}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs md:text-sm">{getStatusBadge(item.status)}</TableCell>
+                      <TableCell className="hidden md:table-cell">
                         {item.coordinates ? (
                           <a 
                             href={`https://www.google.com/maps?q=${item.coordinates.latitude},${item.coordinates.longitude}`} 
@@ -228,20 +236,20 @@ const ODPPage = () => {
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            className="h-8 w-8 p-0 bg-yellow-100 text-yellow-600"
+                            className="h-7 w-7 md:h-8 md:w-8 p-0 bg-yellow-100 text-yellow-600"
                             onClick={() => setEditingODP(item)}
                             title="Edit ODP"
                           >
-                            <Edit className="h-4 w-4" />
+                            <Edit className="h-3 w-3 md:h-4 md:w-4" />
                           </Button>
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            className="h-8 w-8 p-0 bg-red-100 text-red-600"
+                            className="h-7 w-7 md:h-8 md:w-8 p-0 bg-red-100 text-red-600"
                             onClick={() => setDeletingODP(item)}
                             title="Delete ODP"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-3 w-3 md:h-4 md:w-4" />
                           </Button>
                         </div>
                       </TableCell>

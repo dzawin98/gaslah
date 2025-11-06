@@ -11,7 +11,7 @@ const Login = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Login sederhana: user "latansa" dan pass "zil12"
+    // Login sederhana
     if (username === 'latansa' && password === 'zil12') {
       try {
         localStorage.setItem('simpleLogin', '1');
@@ -32,7 +32,7 @@ const Login = () => {
             <input
               type="text"
               className="w-full border rounded-md p-2"
-              placeholder="latansa"
+              placeholder="Masukkan username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoFocus
@@ -43,7 +43,7 @@ const Login = () => {
             <input
               type="password"
               className="w-full border rounded-md p-2"
-              placeholder="zil12"
+              placeholder="Masukkan password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />

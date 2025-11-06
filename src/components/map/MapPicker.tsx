@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, Tooltip } from 'react-leaflet';
 import { Icon, LatLng } from 'leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,11 @@ interface MapPickerProps {
   longitude: string;
   onCoordinateChange: (lat: string, lng: string) => void;
   height?: string;
+  existingMarkers?: Array<{
+    lat: number;
+    lng: number;
+    label?: string;
+  }>;
 }
 
 // Component to handle map clicks
@@ -37,7 +42,8 @@ export const MapPicker: React.FC<MapPickerProps> = ({
   latitude, 
   longitude, 
   onCoordinateChange,
-  height = '400px'
+  height = '400px',
+  existingMarkers = []
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -249,6 +255,17 @@ export const MapPicker: React.FC<MapPickerProps> = ({
             />
             
             <MapClickHandler onLocationSelect={handleLocationSelect} />
+
+            {/* Existing ODP markers for context */}
+            {existingMarkers.map((m, idx) => (
+              <Marker key={`existing-${idx}`} position={[m.lat, m.lng]}>
+                {m.label && (
+                  <Tooltip direction="top" offset={[0, -10]} opacity={0.9} permanent={false}>
+                    {m.label}
+                  </Tooltip>
+                )}
+              </Marker>
+            ))}
             
             {markerPosition && (
               <Marker position={markerPosition}>

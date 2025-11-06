@@ -47,6 +47,79 @@ class MikrotikAPI {
   }
 
   /**
+   * Membuat atau memperbarui PPP Secret di Mikrotik
+   * @param {string} routerName - Nama router
+   * @param {string} username - Username PPP Secret
+   * @param {string} password - Password PPP Secret
+   * @param {string} profile - Nama profile PPP (sesuai paket)
+   * @param {string} service - Jenis service (default: 'pppoe')
+   * @param {string} comment - Komentar opsional
+   * @returns {Promise<Object>} - Hasil operasi
+   */
+  async createPPPSecret(routerName, username, password, profile, service = 'pppoe', comment = '') {
+    let conn = null;
+    try {
+      if (!username || !password) {
+        return { success: false, message: 'Username dan password wajib diisi' };
+      }
+
+      const operationTimeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Operation timeout')), 15000);
+      });
+
+      const operation = async () => {
+        conn = await this.connectToRouter(routerName);
+
+        // Cek apakah secret sudah ada
+        const existing = await conn.write('/ppp/secret/print', [
+          '?name=' + username,
+          '.proplist=.id,name,profile,disabled'
+        ]);
+
+        if (existing.length > 0) {
+          const secretId = existing[0]['.id'];
+          const args = [
+            '=.id=' + secretId,
+            '=password=' + password,
+            '=service=' + (service || 'pppoe'),
+            '=disabled=no'
+          ];
+          if (profile) args.push('=profile=' + profile);
+          if (comment) args.push('=comment=' + comment);
+
+          await conn.write('/ppp/secret/set', args);
+          return { success: true, message: 'PPP Secret diperbarui', updated: true };
+        }
+
+        const addArgs = [
+          '=name=' + username,
+          '=password=' + password,
+          '=service=' + (service || 'pppoe'),
+          '=disabled=no'
+        ];
+        if (profile) addArgs.push('=profile=' + profile);
+        if (comment) addArgs.push('=comment=' + comment);
+
+        await conn.write('/ppp/secret/add', addArgs);
+        return { success: true, message: 'PPP Secret dibuat', created: true };
+      };
+
+      return await Promise.race([operation(), operationTimeout]);
+    } catch (error) {
+      console.error(`[MIKROTIK] Error create PPP Secret ${username} on router ${routerName}:`, error.message);
+      return { success: false, message: error.message, error: error.name };
+    } finally {
+      if (conn) {
+        try {
+          await conn.close();
+        } catch (closeError) {
+          console.error('[MIKROTIK] Error closing connection:', closeError.message);
+        }
+      }
+    }
+  }
+
+  /**
    * Menghapus active connections berdasarkan username
    * @param {string} routerName - Nama router
    * @param {string} username - Username PPP

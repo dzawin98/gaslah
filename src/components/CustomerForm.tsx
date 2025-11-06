@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,14 +11,17 @@ import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
-import { Customer } from '@/types/isp';
+import { Customer, PPPSecret } from '@/types/isp';
 import { useAreas } from '@/hooks/useAreas';
 import { useRouters } from '@/hooks/useRouters';
 import { useODP } from '@/hooks/useODP';
 import { usePackages } from '@/hooks/usePackages';
 import { toast } from 'sonner';
 import { api } from '@/utils/api';
+import { useWahaConfig } from '@/hooks/useWahaConfig';
+import { useAppSetting } from '@/hooks/useAppSetting';
 
 interface CustomerFormProps {
   customer?: Customer;
@@ -51,6 +54,29 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   const { routers } = useRouters();
   const { odp, loading: odpLoading, error: odpError } = useODP();
   const { packages } = usePackages();
+  const { config: wahaConfig } = useWahaConfig();
+  interface WhatsAppSettings { newCustomerMessageTemplate: string; enabled: boolean }
+  const DEFAULT_CUSTOMER_WA_SETTINGS: WhatsAppSettings = {
+    newCustomerMessageTemplate: `Halo {customerName},
+
+Selamat! Layanan internet Anda telah aktif.
+
+Detail Pelanggan:
+📋 No. Pelanggan: {customerNumber}
+📦 Paket: {packageName}
+💰 Harga: Rp {packagePrice}
+📍 Area: {area}
+📅 Tanggal Aktif: {activeDate}
+📅 Tanggal Kadaluarsa: {expireDate}
+
+Silahkan lakukan pembayaran setiap tanggal 1-5 setiap bulannya.
+
+Untuk informasi lebih lanjut, hubungi customer service kami.
+
+Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
+    enabled: true
+  };
+  const { setting: customerWaSettings } = useAppSetting<WhatsAppSettings>('customer-whatsapp-settings', DEFAULT_CUSTOMER_WA_SETTINGS);
   
   const [formData, setFormData] = useState<Partial<Customer>>({
     name: '',
@@ -84,6 +110,10 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [pppSearchTerm, setPppSearchTerm] = useState('');
   const [isPppDialogOpen, setIsPppDialogOpen] = useState(false);
+  const [pppPassword, setPppPassword] = useState('');
+  const [creatingPPP, setCreatingPPP] = useState(false);
+  const [odpSearchTerm, setOdpSearchTerm] = useState('');
+  const [odpComboboxOpen, setOdpComboboxOpen] = useState(false);
 
   // Filter PPP secrets based on search term
   const filteredPppSecrets = pppSecrets.filter(secret => 
@@ -91,18 +121,37 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
   );
 
   // Filter ODP yang tersedia (memiliki slot kosong)
-  const availableODPs = odp.filter(odpItem => odpItem.availableSlots > 0);
+  const availableODPs = useMemo(() => {
+    return odp.filter(odpItem => odpItem.availableSlots > 0);
+  }, [odp]);
+
+  const filteredODPs = useMemo(() => {
+    const term = odpSearchTerm.trim().toLowerCase();
+    if (!term) return availableODPs;
+    return availableODPs.filter((item) => (
+      (item.name || '').toLowerCase().includes(term) ||
+      (item.area || '').toLowerCase().includes(term) ||
+      String(item.id || '').toLowerCase().includes(term)
+    ));
+  }, [availableODPs, odpSearchTerm]);
+
+  // Suspend ODP polling while the ODP selection popover is open to prevent UI jitter
+  useEffect(() => {
+    try {
+      const eventName = odpComboboxOpen ? 'odpSelectionStart' : 'odpSelectionEnd';
+      window.dispatchEvent(new Event(eventName));
+    } catch {}
+  }, [odpComboboxOpen]);
 
 
 
-  // Load customer data when editing
+  // Load customer data when editing (avoid overwriting user's ODP change on ODP list refresh)
   useEffect(() => {
     if (customer) {
       console.log('CustomerForm: Loading customer data for edit:', customer);
       console.log('CustomerForm: Available areas:', areas);
       console.log('CustomerForm: Available routers:', routers);
       console.log('CustomerForm: Available packages:', packages);
-      console.log('CustomerForm: Available ODPs:', odp);
       
       // Convert router ID to router name for display
       let routerName = '';
@@ -111,15 +160,17 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
         routerName = router ? router.name : '';
       }
       
-      setFormData({
+      // Preserve current odpId if the user has already changed it
+      setFormData(prev => ({
         ...customer,
         router: routerName,
         activeDate: customer.activeDate ? customer.activeDate.split('T')[0] : formatDateToLocal(new Date()),
         expireDate: customer.expireDate ? customer.expireDate.split('T')[0] : '',
-        paymentDueDate: customer.paymentDueDate ? customer.paymentDueDate.split('T')[0] : ''
-      });
+        paymentDueDate: customer.paymentDueDate ? customer.paymentDueDate.split('T')[0] : '',
+        odpId: (prev?.odpId && String(prev.odpId).length > 0) ? prev.odpId : (customer as any).odpId || ''
+      }));
     }
-  }, [customer, routers, areas, packages, odp]);
+  }, [customer, routers]);
 
   // Set default dates for new customers
   useEffect(() => {
@@ -138,17 +189,15 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
     }
   }, [customer]);
 
-  // Debug ODP data
+  // Debug ODP data (kurangi spam log dengan dependency yang stabil)
   useEffect(() => {
     console.log('ODP Debug Info:', {
       odpLoading,
       odpError,
       odpCount: odp.length,
-      availableODPsCount: availableODPs.length,
-      odpData: odp,
-      availableODPs
+      availableODPsCount: availableODPs.length
     });
-  }, [odp, odpLoading, odpError, availableODPs]);
+  }, [odpLoading, odpError, odp.length, availableODPs.length]);
 
   // Load PPP Secrets when router is selected
   useEffect(() => {
@@ -163,6 +212,17 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
       setPppSecrets([]);
     }
   }, [formData.router, formData.pppSecretType, routers]);
+
+  // Prefill PPP Secret username when selecting 'new'
+  useEffect(() => {
+    if (formData.pppSecretType === 'new') {
+      // Prefill username based on phone if available
+      const sanitizedPhone = (formData.phone || '').replace(/[^0-9]/g, '');
+      if (!formData.pppSecret && sanitizedPhone) {
+        setFormData(prev => ({ ...prev, pppSecret: sanitizedPhone }));
+      }
+    }
+  }, [formData.pppSecretType, formData.phone]);
 
   // Update package price when package is selected
   useEffect(() => {
@@ -221,19 +281,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
 
   // WhatsApp notification function
   const sendWhatsAppNotification = async (customerData: Partial<Customer>) => {
-    const savedSettings = localStorage.getItem('customer-whatsapp-settings');
-    if (!savedSettings) {
-      console.log('No WhatsApp settings found for new customers');
-      return;
-    }
-
-    let waSettings;
-    try {
-      waSettings = JSON.parse(savedSettings);
-    } catch (error) {
-      console.error('Failed to parse customer WhatsApp settings:', error);
-      return;
-    }
+    const waSettings = customerWaSettings || DEFAULT_CUSTOMER_WA_SETTINGS;
 
     if (!waSettings.enabled) {
       console.log('WhatsApp notifications disabled for new customers');
@@ -241,14 +289,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
     }
 
     try {
-      // Get WAHA config from localStorage
-      const wahaConfigStr = localStorage.getItem('wahaConfig');
-      if (!wahaConfigStr) {
+      // Use WAHA config from hook (server persisted)
+      if (!wahaConfig || !wahaConfig.baseUrl || !wahaConfig.session) {
         console.warn('WAHA config not found. Please configure WAHA settings in Messages page.');
         return;
       }
-
-      const wahaConfig = JSON.parse(wahaConfigStr);
 
       // Format phone number (remove +, spaces, etc.)
       const formattedPhone = customerData.phone?.replace(/[^0-9]/g, '') || '';
@@ -370,7 +415,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
       }
       
       // Fallback to direct fetch if API client fails
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.latansa.my.id/api';
       
       const response = await fetch(`${API_BASE_URL}/routers/${routerId}/ppp-secrets`, {
         method: 'GET',
@@ -402,7 +447,57 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
     }
   };
   
-  // PPP Secret creation function has been removed due to API instability
+  const createNewPPPSecret = async () => {
+    try {
+      if (creatingPPP) return;
+      // Validate inputs
+      if (!formData.router) {
+        toast.error('Pilih router terlebih dahulu');
+        return;
+      }
+      if (!formData.package) {
+        toast.error('Pilih paket terlebih dahulu');
+        return;
+      }
+      if (!formData.pppSecret) {
+        toast.error('Masukkan username PPP');
+        return;
+      }
+      if (!pppPassword) {
+        toast.error('Masukkan password PPP');
+        return;
+      }
+
+      const selectedRouter = routers.find(r => r.name === formData.router);
+      if (!selectedRouter) {
+        toast.error('Router tidak valid');
+        return;
+      }
+
+      const profile = getProfileFromPackage(formData.package);
+      setCreatingPPP(true);
+      const resp = await api.createPPPSecret(selectedRouter.id.toString(), {
+        name: formData.pppSecret,
+        password: pppPassword,
+        profile,
+        service: 'pppoe',
+        comment: `Created via CustomerForm for ${formData.name || ''}`
+      });
+
+      if (resp.success) {
+        toast.success(`PPP Secret '${formData.pppSecret}' berhasil dibuat di MikroTik`);
+        // Keep the selected secret in form
+        setFormData(prev => ({ ...prev, pppSecret: formData.pppSecret }));
+      } else {
+        toast.error(resp.message || 'Gagal membuat PPP Secret');
+      }
+    } catch (error) {
+      console.error('Create PPP Secret error:', error);
+      toast.error('Terjadi kesalahan saat membuat PPP Secret');
+    } finally {
+      setCreatingPPP(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -412,12 +507,48 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
       return;
     }
     
-    // PPP Secret validation removed due to API instability
+    // Jika pilih buat secret baru, coba buat di MikroTik terlebih dahulu
+    if (formData.pppSecretType === 'new') {
+      if (!formData.router) {
+        alert('Pilih router terlebih dahulu untuk membuat PPP Secret');
+        return;
+      }
+      if (!formData.package) {
+        alert('Pilih paket terlebih dahulu untuk menentukan profile PPP');
+        return;
+      }
+      if (!formData.pppSecret) {
+        alert('Masukkan username PPP Secret');
+        return;
+      }
+      if (!pppPassword) {
+        alert('Masukkan password PPP Secret');
+        return;
+      }
+      try {
+        await createNewPPPSecret();
+      } catch (err) {
+        console.warn('Melewati pembuatan PPP Secret karena error:', err);
+      }
+    }
     
     try {
-      // PPP Secret creation has been removed due to API instability
-      // Customer data will be saved without automatic PPP Secret creation
-      
+      // Basic validation to prevent server 500 on missing required fields
+      const errors: string[] = [];
+      const sanitizedPhone = (formData.phone || '').trim();
+      if (!formData.name || !String(formData.name).trim()) errors.push('Nama pelanggan wajib diisi');
+      if (!sanitizedPhone) errors.push('Nomor telepon wajib diisi');
+      if (!formData.area) errors.push('Area wajib dipilih');
+      if (!formData.package) errors.push('Paket wajib dipilih');
+      if (!formData.activeDate) errors.push('Tanggal aktif wajib diisi');
+      if (!formData.expireDate) errors.push('Tanggal kadaluarsa wajib diisi');
+      if (!formData.paymentDueDate) errors.push('Jatuh tempo pembayaran wajib diisi');
+
+      if (errors.length > 0) {
+        toast.error('Data tidak lengkap', { description: errors.join(', ') });
+        return;
+      }
+
       // Convert router name to router ID
       const submitData = { ...formData };
       if (submitData.router) {
@@ -428,10 +559,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
         }
       }
       
-      if (!customer) {
-        const customerNumber = `LTS${Date.now().toString().slice(-6)}`;
-        submitData.customerNumber = customerNumber;
-      }
+      // Biarkan backend yang menghasilkan customerNumber unik
       
       if (!submitData.paymentDueDate) {
         const dueDate = new Date();
@@ -439,7 +567,34 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
         submitData.paymentDueDate = dueDate.toISOString().split('T')[0];
       }
       
+      // Normalisasi dan sanitasi tipe untuk odpId jika ada
+      console.log('🔍 Debug - Original odpId:', submitData.odpId, 'Type:', typeof submitData.odpId);
+      if (typeof submitData.odpId === 'string') {
+        const trimmed = (submitData.odpId || '').trim();
+        if (trimmed.length === 0) {
+          // Hapus field kosong untuk mencegah MySQL mengubah '' menjadi 0
+          delete (submitData as any).odpId;
+          console.log('🔍 Debug - odpId kosong, dihapus dari payload');
+        } else {
+          const parsed = parseInt(trimmed, 10);
+          console.log('🔍 Debug - Parsed odpId:', parsed, 'isNaN:', isNaN(parsed));
+          if (!isNaN(parsed)) {
+            (submitData as any).odpId = parsed;
+            console.log('🔍 Debug - Final odpId (number):', submitData.odpId);
+          } else {
+            // Nilai tidak valid, hapus untuk menghindari FK error
+            delete (submitData as any).odpId;
+            console.log('🔍 Debug - odpId tidak valid, dihapus dari payload');
+          }
+        }
+      } else if (submitData.odpId === undefined || submitData.odpId === null) {
+        console.log('🔍 Debug - No odpId provided, field absent');
+      } else if (typeof submitData.odpId === 'number') {
+        console.log('🔍 Debug - odpId is number:', submitData.odpId);
+      }
+
       // Submit the customer data
+      console.log('🚀 Debug - Complete payload being sent:', JSON.stringify(submitData, null, 2));
       onSubmit(submitData);
       
       // Send WhatsApp notification for new customers only
@@ -621,29 +776,49 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>ODP (Optical Distribution Point)</Label>
-              <Select 
-                value={formData.odpId || undefined} 
-                onValueChange={(value) => handleChange('odpId', value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Pilih ODP" />
-                </SelectTrigger>
-                <SelectContent>
+              <Popover open={odpComboboxOpen} onOpenChange={setOdpComboboxOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    {formData.odpId
+                      ? (() => {
+                          const selected = odp.find((o) => String(o.id) === String(formData.odpId));
+                          return selected ? `${selected.name} - ${selected.area} (Slot: ${selected.availableSlots}/${selected.totalSlots})` : 'Pilih ODP';
+                        })()
+                      : 'Pilih ODP'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0 w-[480px] max-h-[380px] overflow-auto">
                   {odpLoading ? (
-                    <SelectItem value="loading" disabled>Loading...</SelectItem>
+                    <div className="p-3 text-sm">Loading ODP...</div>
                   ) : odpError ? (
-                    <SelectItem value="error" disabled>Error loading ODP</SelectItem>
-                  ) : availableODPs.length === 0 ? (
-                    <SelectItem value="no-odp" disabled>Tidak ada ODP tersedia</SelectItem>
+                    <div className="p-3 text-sm text-red-600">Error memuat ODP</div>
                   ) : (
-                    availableODPs.map((odpItem) => (
-                      <SelectItem key={odpItem.id} value={odpItem.id.toString()}>
-                        {odpItem.name} - {odpItem.area} (Slot: {odpItem.availableSlots}/{odpItem.totalSlots})
-                      </SelectItem>
-                    ))
+                    <Command>
+                      <CommandInput placeholder="Cari ODP berdasarkan nama/area/ID..." autoFocus />
+                      <CommandList className="max-h-[340px] overflow-y-auto">
+                        <CommandEmpty>Tidak ada ODP yang cocok</CommandEmpty>
+                        <CommandGroup heading="Daftar ODP">
+                          {filteredODPs.map((o) => (
+                            <CommandItem
+                              key={o.id}
+                              value={`${o.name} ${o.area} ${o.id}`}
+                              onSelect={() => {
+                                handleChange('odpId', o.id?.toString() || '');
+                                setOdpComboboxOpen(false);
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span className="text-sm">{o.name} <span className="text-xs text-gray-500">({o.area})</span></span>
+                                <span className="text-xs text-gray-500">ID: {o.id} • Slot: {o.availableSlots}/{o.totalSlots}</span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
                   )}
-                </SelectContent>
-              </Select>
+                </PopoverContent>
+              </Popover>
             </div>
             
             <div>
@@ -668,13 +843,64 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, onSubmit, onCance
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+              <SelectContent>
                   <SelectItem value="none">Tidak menggunakan PPP Secret</SelectItem>
                   <SelectItem value="existing">Gunakan PPP Secret yang sudah ada</SelectItem>
-                </SelectContent>
-              </Select>
+                  <SelectItem value="new">Buat Secret Baru</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          {formData.pppSecretType === 'new' && (
+            <div className="space-y-3 border rounded p-3 bg-gray-50">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="pppSecretNew">Username PPP</Label>
+                  <Input
+                    id="pppSecretNew"
+                    value={formData.pppSecret || ''}
+                    onChange={(e) => handleChange('pppSecret', e.target.value)}
+                    placeholder="Masukkan username PPP"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="pppPassword">Password PPP</Label>
+                  <Input
+                    id="pppPassword"
+                    type="password"
+                    value={pppPassword}
+                    onChange={(e) => setPppPassword(e.target.value)}
+                    placeholder="Masukkan password PPP"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-sm text-gray-700">
+                <div>
+                  <span className="font-medium">Router:</span>{' '}
+                  {formData.router || 'Belum dipilih'}
+                </div>
+                <div>
+                  <span className="font-medium">Paket:</span>{' '}
+                  {formData.package || 'Belum dipilih'}
+                </div>
+                <div>
+                  <span className="font-medium">Profile:</span>{' '}
+                  {formData.package ? getProfileFromPackage(formData.package) : '-'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" onClick={createNewPPPSecret} disabled={creatingPPP}>
+                  {creatingPPP ? 'Membuat...' : 'Buat Secret Baru di MikroTik'}
+                </Button>
+                {formData.pppSecret && (
+                  <p className="text-sm text-green-600 flex items-center">
+                    ✓ Username akan digunakan: {formData.pppSecret}
+                  </p>
+                )}
+              </div>
             </div>
-            
+          )}
+
             {formData.pppSecretType === 'existing' && (
               <div>
                 <Label htmlFor="pppSecret">PPP Secret</Label>

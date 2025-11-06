@@ -50,7 +50,7 @@ interface DashboardStats {
   totalRouters: number;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.latansa.my.id/api';
 
 // Create axios instance
 const apiClient = axios.create({
@@ -250,16 +250,57 @@ const getCustomers = async (): Promise<ApiResponse<Customer[]>> => {
 
 const createCustomer = async (customerData: Omit<Customer, 'id'>): Promise<ApiResponse<Customer>> => {
   try {
+    // Defensive sanitize: do not send empty string for odpId
+    if (typeof (customerData as any).odpId === 'string') {
+      const trimmed = ((customerData as any).odpId || '').trim();
+      if (trimmed.length === 0) {
+        delete (customerData as any).odpId;
+        console.log('🔍 API - Removed empty odpId from payload');
+      } else {
+        const parsed = parseInt(trimmed, 10);
+        if (!isNaN(parsed)) {
+          (customerData as any).odpId = parsed;
+          console.log('🔍 API - Normalized odpId to number:', parsed);
+        } else {
+          delete (customerData as any).odpId;
+          console.log('🔍 API - Invalid odpId string, removed from payload');
+        }
+      }
+    }
+    console.log('🔍 API - Sending customerData to backend:', JSON.stringify(customerData, null, 2));
     const response = await apiClient.post('/customers', customerData);
     return response.data;
-  } catch (error) {
+  } catch (error: any) {
+    const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
+    if (backendMessage) {
+      console.error('Error creating customer:', backendMessage, error?.response?.data);
+      throw new Error(backendMessage);
+    }
     console.error('Error creating customer:', error);
-    throw error;
+    throw new Error('Failed to create customer');
   }
 };
 
 const updateCustomer = async (id: string, customerData: Partial<Customer>): Promise<ApiResponse<Customer>> => {
   try {
+    // Normalize odpId if it comes as string to avoid backend mismatch
+    if (typeof (customerData as any).odpId === 'string') {
+      const trimmed = ((customerData as any).odpId || '').trim();
+      if (trimmed.length === 0) {
+        delete (customerData as any).odpId;
+        console.log('🔍 API - Removed empty odpId from update payload');
+      } else {
+        const parsed = parseInt(trimmed, 10);
+        if (!isNaN(parsed)) {
+          (customerData as any).odpId = parsed;
+          console.log('🔍 API - Normalized odpId to number (update):', parsed);
+        } else {
+          delete (customerData as any).odpId;
+          console.log('🔍 API - Invalid odpId string in update, removed from payload');
+        }
+      }
+    }
+
     const response = await apiClient.put(`/customers/${id}`, customerData);
     return response.data;
   } catch (error) {
@@ -336,6 +377,19 @@ const getRouterPPPProfiles = async (routerId: string): Promise<ApiResponse<Mikro
     return response.data;
   } catch (error) {
     console.error('Error fetching PPP profiles:', error);
+    throw error;
+  }
+};
+
+const createPPPSecret = async (
+  routerId: string,
+  data: { name: string; password: string; profile?: string; service?: string; comment?: string }
+): Promise<ApiResponse<{ name: string; profile?: string; service: string }>> => {
+  try {
+    const response = await apiClient.post(`/routers/${routerId}/ppp-secrets`, data);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating PPP secret:', error);
     throw error;
   }
 };
@@ -630,6 +684,20 @@ export const api = {
     return response.data?.data || response.data;
   },
 
+  // Auth
+  logout: async () => {
+    try {
+      const response = await apiClient.post('/auth/logout');
+      return response.data;
+    } catch (error: any) {
+      const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
+      if (backendMessage) {
+        console.error('Error logout:', backendMessage);
+      }
+      return { success: false, message: 'Logout gagal' };
+    }
+  },
+
   // Router
   getRouters,
   createRouter,
@@ -670,6 +738,7 @@ export const api = {
   // MikroTik
   getPPPSecrets,
   getRouterPPPProfiles,
+  createPPPSecret,
   disablePPPUser,
   enablePPPUser,
   checkPPPUserStatus,

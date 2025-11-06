@@ -577,7 +577,7 @@ const CustomReceipt = () => {
               {/* Header */}
               <div className="flex justify-between items-start mb-8">
                  <div className="flex items-start">
-                   <div className="w-20 h-20 flex items-center justify-center mr-4">
+                   <div className="w-12 h-12 md:w-20 md:h-20 flex items-center justify-center mr-2 md:mr-4">
                      {logoFile ? (
                        <img src={logoFile} alt="Logo" className="w-full h-full object-contain" />
                      ) : (

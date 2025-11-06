@@ -37,23 +37,23 @@ const Dashboard = () => {
   const { packages } = usePackages();
   
   const [currentTime, setCurrentTime] = useState(getCurrentJakartaTime());
-
+  
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(getCurrentJakartaTime());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
-
+  
   // Fetch transactions for revenue calculation
   const { data: transactionsResponse } = useQuery({
     queryKey: ['transactions'],
     queryFn: api.getTransactions,
   });
-
+  
   // Extract transactions array from API response
   const transactions = transactionsResponse?.data || [];
-
+  
   // Calculate metrics using correct status fields
   const totalCustomers = customers.length;
   
@@ -183,18 +183,18 @@ const Dashboard = () => {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
         {/* Total Customers */}
         <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="p-4">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-blue-600">{totalCustomers}</div>
-                <div className="text-sm text-gray-500">Total Pelanggan</div>
-                <div className="text-xs text-green-600">+{newCustomersThisWeek} minggu ini</div>
+                <div className="text-lg md:text-2xl font-bold text-blue-600">{totalCustomers}</div>
+                <div className="text-xs md:text-sm text-gray-500">Total Pelanggan</div>
+                <div className="text-xs text-gray-600">{areas.length} area</div>
               </div>
-              <div className="h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center">
-                <Users className="h-6 w-6 text-blue-600" />
+              <div className="h-8 w-8 md:h-12 md:w-12 bg-blue-100 rounded-full flex items-center justify-center">
+                <Users className="h-4 w-4 md:h-6 md:w-6 text-blue-600" />
               </div>
             </div>
           </CardContent>
@@ -202,15 +202,15 @@ const Dashboard = () => {
 
         {/* Active Customers */}
         <Card className="border-l-4 border-l-green-500">
-          <CardContent className="p-4">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-green-600">{activeCustomers}</div>
-                <div className="text-sm text-gray-500">Pelanggan Aktif</div>
+                <div className="text-lg md:text-2xl font-bold text-green-600">{activeCustomers}</div>
+                <div className="text-xs md:text-sm text-gray-500">Pelanggan Aktif</div>
                 <div className="text-xs text-gray-600">{totalCustomers > 0 ? Math.round((activeCustomers/totalCustomers)*100) : 0}% dari total</div>
               </div>
-              <div className="h-12 w-12 bg-green-100 rounded-full flex items-center justify-center">
-                <CheckCircle className="h-6 w-6 text-green-600" />
+              <div className="h-8 w-8 md:h-12 md:w-12 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-4 w-4 md:h-6 md:w-6 text-green-600" />
               </div>
             </div>
           </CardContent>
@@ -218,17 +218,17 @@ const Dashboard = () => {
 
         {/* Monthly Revenue */}
         <Card className="border-l-4 border-l-purple-500">
-          <CardContent className="p-4">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-purple-600">
+                <div className="text-lg md:text-2xl font-bold text-purple-600">
                   {Math.round(monthlyRevenue).toLocaleString('id-ID')}
                 </div>
-                <div className="text-sm text-gray-500">Pendapatan Bulan Ini</div>
+                <div className="text-xs md:text-sm text-gray-500">Pendapatan Bulan Ini</div>
                 <div className="text-xs text-gray-600">{monthlyTransactions.length} transaksi</div>
               </div>
-              <div className="h-12 w-12 bg-purple-100 rounded-full flex items-center justify-center">
-                <DollarSign className="h-6 w-6 text-purple-600" />
+              <div className="h-8 w-8 md:h-12 md:w-12 bg-purple-100 rounded-full flex items-center justify-center">
+                <DollarSign className="h-4 w-4 md:h-6 md:w-6 text-purple-600" />
               </div>
             </div>
           </CardContent>
@@ -236,17 +236,17 @@ const Dashboard = () => {
 
         {/* Total Revenue */}
         <Card className="border-l-4 border-l-emerald-500">
-          <CardContent className="p-4">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-emerald-600">
+                <div className="text-lg md:text-2xl font-bold text-emerald-600">
                   Rp. {Math.round(totalRevenue).toLocaleString('id-ID')}
                 </div>
-                <div className="text-sm text-gray-500">Total Pendapatan Selama ini</div>
+                <div className="text-xs md:text-sm text-gray-500">Total Pendapatan Selama ini</div>
                 <div className="text-xs text-gray-600">{transactions.length} total transaksi</div>
               </div>
-              <div className="h-12 w-12 bg-emerald-100 rounded-full flex items-center justify-center">
-                <DollarSign className="h-6 w-6 text-emerald-600" />
+              <div className="h-8 w-8 md:h-12 md:w-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                <DollarSign className="h-4 w-4 md:h-6 md:w-6 text-emerald-600" />
               </div>
             </div>
           </CardContent>
@@ -256,67 +256,67 @@ const Dashboard = () => {
       </div>
 
       {/* Analytics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-6">
 
         {/* Customer Analytics */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Users className="h-5 w-5" />
+          <CardHeader className="pb-3 md:pb-6">
+            <CardTitle className="flex items-center space-x-2 text-sm md:text-base">
+              <Users className="h-4 w-4 md:h-5 md:w-5" />
               <span>Analitik Pelanggan</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
+          <CardContent className="space-y-3 md:space-y-4 pt-0">
+            <div className="space-y-2 md:space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm">Aktif</span>
+                <span className="text-xs md:text-sm">Aktif</span>
                 <div className="flex items-center space-x-2">
-                  <div className="w-16 bg-gray-200 rounded-full h-2">
+                  <div className="w-12 md:w-16 bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-green-500 h-2 rounded-full" 
                       style={{ width: `${totalCustomers > 0 ? (activeCustomers/totalCustomers)*100 : 0}%` }}
                     ></div>
                   </div>
-                  <span className="text-sm font-medium">{activeCustomers}</span>
+                  <span className="text-xs md:text-sm font-medium">{activeCustomers}</span>
                 </div>
               </div>
               
               <div className="flex items-center justify-between">
-                <span className="text-sm">Suspended</span>
+                <span className="text-xs md:text-sm">Suspended</span>
                 <div className="flex items-center space-x-2">
-                  <div className="w-16 bg-gray-200 rounded-full h-2">
+                  <div className="w-12 md:w-16 bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-red-500 h-2 rounded-full" 
                       style={{ width: `${totalCustomers > 0 ? (suspendedCustomers/totalCustomers)*100 : 0}%` }}
                     ></div>
                   </div>
-                  <span className="text-sm font-medium">{suspendedCustomers}</span>
+                  <span className="text-xs md:text-sm font-medium">{suspendedCustomers}</span>
                 </div>
               </div>
               
               <div className="flex items-center justify-between">
-                <span className="text-sm">Belum Bayar</span>
+                <span className="text-xs md:text-sm">Belum Bayar</span>
                 <div className="flex items-center space-x-2">
-                  <div className="w-16 bg-gray-200 rounded-full h-2">
+                  <div className="w-12 md:w-16 bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-yellow-500 h-2 rounded-full" 
                       style={{ width: `${totalCustomers > 0 ? (unpaidCustomers/totalCustomers)*100 : 0}%` }}
                     ></div>
                   </div>
-                  <span className="text-sm font-medium">{unpaidCustomers}</span>
+                  <span className="text-xs md:text-sm font-medium">{unpaidCustomers}</span>
                 </div>
               </div>
               
               <div className="flex items-center justify-between">
-                <span className="text-sm">Instalasi Baru</span>
+                <span className="text-xs md:text-sm">Instalasi Baru</span>
                 <div className="flex items-center space-x-2">
-                  <div className="w-16 bg-gray-200 rounded-full h-2">
+                  <div className="w-12 md:w-16 bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-blue-500 h-2 rounded-full" 
                       style={{ width: `${totalCustomers > 0 ? (newInstallations/totalCustomers)*100 : 0}%` }}
                     ></div>
                   </div>
-                  <span className="text-sm font-medium">{newInstallations}</span>
+                  <span className="text-xs md:text-sm font-medium">{newInstallations}</span>
                 </div>
               </div>
             </div>

@@ -87,9 +87,26 @@ router.post('/', async (req, res) => {
       }, { transaction });
     }
     
-    // Generate customer number
-    const count = await Customer.count({ transaction });
-    customerData.customerNumber = 'LTS' + (count + 1).toString().padStart(4, '0');
+    // Generate unique customer number (avoid collisions with imported data)
+    const generateUniqueCustomerNumber = async () => {
+      // Try random LTSXXXX first
+      for (let i = 0; i < 100; i++) {
+        const candidate = 'LTS' + Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+        const exists = await Customer.findOne({ where: { customerNumber: candidate }, transaction });
+        if (!exists) return candidate;
+      }
+      // Fallback: time-based + random suffix
+      for (let i = 0; i < 50; i++) {
+        const ts = Date.now().toString().slice(-6);
+        const rand = Math.floor(10 + Math.random() * 90).toString();
+        const candidate = `LTS${ts}${rand}`;
+        const exists = await Customer.findOne({ where: { customerNumber: candidate }, transaction });
+        if (!exists) return candidate;
+      }
+      throw new Error('Gagal menghasilkan nomor pelanggan unik');
+    };
+
+    customerData.customerNumber = await generateUniqueCustomerNumber();
     
     const customer = await Customer.create(customerData, { transaction });
     
@@ -428,6 +445,25 @@ router.post('/:id/check-ppp-status', async (req, res) => {
     const status = await mikrotikAPI.checkPPPSecretStatus(customer.routerData.name, customer.pppSecret);
     
     if (status.success) {
+      // Sinkronisasi ke database: update mikrotikStatus jika secret ditemukan
+      let databaseStatusBefore = customer.mikrotikStatus;
+      let databaseStatusAfter = databaseStatusBefore;
+      let synced = false;
+      if (status.found && typeof status.disabled === 'boolean') {
+        const newStatus = status.disabled ? 'disabled' : 'active';
+        if (newStatus !== databaseStatusBefore) {
+          try {
+            await customer.update({
+              mikrotikStatus: newStatus,
+              ...(status.disabled ? { lastSuspendDate: new Date() } : {})
+            });
+            databaseStatusAfter = newStatus;
+            synced = true;
+          } catch (updateError) {
+            console.error('Failed to sync mikrotikStatus to DB:', updateError.message);
+          }
+        }
+      }
       res.json({
         success: true,
         message: 'Status PPP Secret berhasil diperiksa',
@@ -443,6 +479,9 @@ router.post('/:id/check-ppp-status', async (req, res) => {
             service: status.service
           },
           databaseStatus: customer.mikrotikStatus,
+          databaseStatusBefore,
+          databaseStatusAfter,
+          synced,
           mikrotikMessage: status.message
         }
       });

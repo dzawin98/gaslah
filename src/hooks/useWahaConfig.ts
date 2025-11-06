@@ -5,7 +5,7 @@ import { api } from '@/utils/api';
 const DEFAULT_WAHA_CONFIG = {
   baseUrl: 'https://whatsapp.latansa.my.id',
   session: 'default',
-  apiKey: 'dzawinwaha878472873129@#'
+  apiKey: '3b0de781f77844f6953060226a24b56d'
 };
 
 export const useWahaConfig = () => {
@@ -16,41 +16,19 @@ export const useWahaConfig = () => {
     queryFn: async () => {
       try {
         const response = await api.get('/settings/waha');
-        console.log('WAHA config from API:', response);
-        
-        const wahaData = response?.data || response;
-        
-        // Handle API response format: {key: 'waha', value: {baseUrl, session, apiKey}}
-        let finalConfig;
-        if (wahaData && wahaData.value) {
-          finalConfig = wahaData.value;
-        } else if (wahaData && wahaData.baseUrl) {
-          finalConfig = wahaData;
-        } else {
-          throw new Error('Invalid API response format');
-        }
-        
-        localStorage.setItem('wahaConfig', JSON.stringify(finalConfig));
-        return finalConfig;
+        const payload = response?.data?.data ?? response?.data ?? response;
+        const merged = {
+          ...DEFAULT_WAHA_CONFIG,
+          ...payload,
+          apiKey: payload?.apiKey || DEFAULT_WAHA_CONFIG.apiKey,
+          session: payload?.session || DEFAULT_WAHA_CONFIG.session,
+          baseUrl:
+            !payload?.baseUrl || payload?.baseUrl === 'http://localhost:3000'
+              ? DEFAULT_WAHA_CONFIG.baseUrl
+              : payload?.baseUrl
+        };
+        return merged;
       } catch (error) {
-        console.error('Error fetching WAHA config from API:', error);
-        
-        // Cek localStorage
-        const localConfig = localStorage.getItem('wahaConfig');
-        if (localConfig) {
-          try {
-            const parsedConfig = JSON.parse(localConfig);
-            console.log('Using WAHA config from localStorage:', parsedConfig);
-            return parsedConfig;
-          } catch (parseError) {
-            console.error('Error parsing localStorage WAHA config:', parseError);
-            localStorage.removeItem('wahaConfig');
-          }
-        }
-        
-        // Gunakan default config jika semua gagal
-        console.log('Using default WAHA config:', DEFAULT_WAHA_CONFIG);
-        localStorage.setItem('wahaConfig', JSON.stringify(DEFAULT_WAHA_CONFIG));
         return DEFAULT_WAHA_CONFIG;
       }
     },
@@ -60,23 +38,22 @@ export const useWahaConfig = () => {
 
   const updateConfig = useMutation({
     mutationFn: async (newConfig: any) => {
-      console.log('Updating WAHA config:', newConfig);
-      
-      try {
-        const response = await api.put('/settings/waha', newConfig);
-        
-        localStorage.setItem('wahaConfig', JSON.stringify(newConfig));
-        console.log('WAHA config updated successfully');
-        
-        return response;
-      } catch (error) {
-        console.error('Error updating WAHA config:', error);
-        throw error;
-      }
+      const response = await api.put('/settings/waha', newConfig);
+      return response?.data ?? response;
     },
-    onSuccess: (data, variables) => {
-      queryClient.setQueryData(['wahaConfig'], variables);
-      queryClient.invalidateQueries({ queryKey: ['wahaConfig'] });
+    onSuccess: (data) => {
+      const payload = data?.data ?? data;
+      const merged = {
+        ...DEFAULT_WAHA_CONFIG,
+        ...payload,
+        apiKey: payload?.apiKey || DEFAULT_WAHA_CONFIG.apiKey,
+        session: payload?.session || DEFAULT_WAHA_CONFIG.session,
+        baseUrl:
+          !payload?.baseUrl || payload?.baseUrl === 'http://localhost:3000'
+            ? DEFAULT_WAHA_CONFIG.baseUrl
+            : payload?.baseUrl
+      };
+      queryClient.setQueryData(['wahaConfig'], merged);
     },
   });
 

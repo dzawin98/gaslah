@@ -15,6 +15,7 @@ import { useCustomers } from '@/hooks/useCustomers';
 import { useAreas } from '@/hooks/useAreas';
 import { usePackages } from '@/hooks/usePackages';
 import { useWahaConfig } from '@/hooks/useWahaConfig';
+import { useAppSetting } from '@/hooks/useAppSetting';
 import { Transaction, Customer } from '@/types/isp';
 import { toast } from 'sonner';
 
@@ -163,22 +164,7 @@ const Transactions = () => {
   
   // WhatsApp settings
   const [waSettings, setWaSettings] = useState<WhatsAppSettings>({
-    paymentMessageTemplate: `Halo {customerName},
-
-Pembayaran internet Anda telah berhasil diproses.
-
-Detail Pembayaran:
-📋 No. Pelanggan: {customerNumber}
-💰 Jumlah: Rp {amount}
-📅 Periode: {period}
-🧾 No. Nota: {receiptNumber}
-
-Terima kasih atas pembayaran Anda.
-
-🔗 Lihat Nota: {receiptUrl}
-
-Salam,
-LATANSA NETWORKS`,
+    paymentMessageTemplate: `(Pesan Sistem Otomatis)\n\nHalo {customerName} - {area},\n\nPEMBAYARAN INTERNET ANDA TELAH KAMI TERIMA.\n\nDetail Pembayaran:\n📋 No. Pelanggan: {customerNumber}\n💰 Jumlah: Rp {amount}\n📅 Periode: {period}\n🧾 No. Nota: {receiptNumber}\n\nTerima kasih atas pembayaran Anda.\n\n🔗 Lihat Nota: {receiptUrl}\n\nSalam,\nLATANSA NETWORKS`,
     receiptMessageTemplate: `📄 Nota Pembayaran
 
 Pelanggan: {customerName}
@@ -196,11 +182,14 @@ Tanggal: {paymentDate}
   
   // Helper functions
   const searchCustomers = (searchTerm: string) => {
-    return customers.filter(customer => 
-      customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.customerNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.pppSecret.toLowerCase().includes(searchTerm.toLowerCase())
-    ).slice(0, 10); // Limit to 10 results
+    const term = (searchTerm || '').toLowerCase();
+    return customers
+      .filter((customer) =>
+        ((customer.name || '').toLowerCase().includes(term)) ||
+        ((customer.customerNumber || '').toLowerCase().includes(term)) ||
+        ((customer.pppSecret || '').toLowerCase().includes(term))
+      )
+      .slice(0, 10); // Batasi ke 10 hasil
   };
 
   // Tambahkan fungsi untuk cek status pembayaran
@@ -311,20 +300,28 @@ Tanggal: {paymentDate}
   // Mock transactions data - replace with actual API call
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   
+  // Server-persisted WhatsApp settings for transactions
+  const { setting: serverWaSettings, saveSetting: saveTxnWaSetting } = useAppSetting<WhatsAppSettings>('whatsapp-settings', {
+    paymentMessageTemplate: `(Pesan Sistem Otomatis)\n\nHalo {customerName} - {area},\n\nPEMBAYARAN INTERNET ANDA TELAH KAMI TERIMA.\n\nDetail Pembayaran:\n📋 No. Pelanggan: {customerNumber}\n💰 Jumlah: Rp {amount}\n📅 Periode: {period}\n🧾 No. Nota: {receiptNumber}\n\nTerima kasih atas pembayaran Anda.\n\n🔗 Lihat Nota: {receiptUrl}\n\nSalam,\nLATANSA NETWORKS`,
+    receiptMessageTemplate: `Halo {customerName},
+
+Terima kasih. Kami telah menerima pembayaran Anda sebesar Rp {amount} untuk periode {period}.
+No. Nota: {receiptNumber}
+Link Nota: {receiptUrl}`,
+    enabled: true
+  });
+
+  // Sinkronkan WA settings dari server ketika berubah
   useEffect(() => {
-    // Load WhatsApp settings from localStorage
-    const savedSettings = localStorage.getItem('whatsapp-settings');
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        setWaSettings(parsed);
-      } catch (error) {
-        console.error('Failed to parse WhatsApp settings:', error);
-      }
+    if (serverWaSettings) {
+      setWaSettings(serverWaSettings);
     }
-    
-    // Load mock transactions
+  }, [serverWaSettings]);
+
+  // Muat transaksi sekali saat mount
+  useEffect(() => {
     loadTransactions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
   const loadTransactions = async () => {
@@ -424,9 +421,11 @@ Tanggal: {paymentDate}
       // Replace placeholders in template
       let message = waSettings.paymentMessageTemplate
         .replace(/{customerName}/g, customer.name)
+        .replace(/{area}/g, customer.area || '')
         .replace(/{customerNumber}/g, customer.customerNumber || '')
         .replace(/{packageName}/g, customer.package || '')
         .replace(/{amount}/g, transaction.amount.toLocaleString('id-ID'))
+        .replace(/{amount:,}/g, transaction.amount.toLocaleString('id-ID'))
         .replace(/{period}/g, periodText)
         .replace(/{receiptNumber}/g, transaction.receiptNumber || '')
         .replace(/{receiptUrl}/g, receiptUrl);
@@ -604,7 +603,7 @@ Tanggal: {paymentDate}
                 customerName: customer.name,
                 amount: formData.grandTotal,
                 type: 'payment' as const,
-                method: formData.paymentMethod.toLowerCase() as 'cash' | 'transfer' | 'digital_wallet' | 'other',
+                method: String(formData.paymentMethod || 'cash').toLowerCase() as 'cash' | 'transfer' | 'digital_wallet' | 'other',
                 description: formData.description,
                 status: 'paid' as const,
                 paidAt: new Date(),
@@ -640,6 +639,10 @@ Tanggal: {paymentDate}
             };
 
             await api.updateCustomer(customer.id, updatedCustomer);
+            // Inform ODP consumers that customer updates may affect ODP utilization
+            try {
+              window.dispatchEvent(new CustomEvent('odpRefresh'));
+            } catch {}
             
             // TODO: Aktifkan kembali PPP Secret di MikroTik
             // await mikrotikAPI.enablePPPSecret(customer.router, customer.pppSecret);
@@ -700,11 +703,12 @@ Tanggal: {paymentDate}
     if (!customer) return false;
     
     // Search filter
-    const searchMatch = !searchTerm || 
-      customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.customerNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.pppSecret.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      transaction.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = (searchTerm || '').toLowerCase();
+    const searchMatch = !term || 
+      ((customer.name || '').toLowerCase().includes(term)) ||
+      ((customer.customerNumber || '').toLowerCase().includes(term)) ||
+      ((customer.pppSecret || '').toLowerCase().includes(term)) ||
+      ((transaction.description || '').toLowerCase().includes(term));
     
     // Payment method filter
     const methodMatch = paymentMethodFilter === 'all' || transaction.method === paymentMethodFilter;
@@ -726,20 +730,13 @@ Tanggal: {paymentDate}
     if (!confirm('Apakah Anda yakin ingin menghapus transaksi ini?')) return;
     
     try {
-      // Hapus dari database terlebih dahulu
-      const response = await fetch(`http://localhost:3001/api/transactions/${transactionId}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (response.ok) {
-        // Jika berhasil dihapus dari database, hapus dari state lokal
+      // Gunakan util API yang sudah terkonfigurasi (proxy/baseURL), hindari cross-origin issues
+      const result = await api.deleteTransaction(transactionId);
+      if (result?.success !== false) {
         setTransactions(prev => prev.filter(t => t.id !== transactionId));
         toast.success('Transaksi berhasil dihapus');
       } else {
-        throw new Error('Gagal menghapus transaksi dari database');
+        throw new Error('Gagal menghapus transaksi dari server');
       }
     } catch (error) {
       console.error('Error deleting transaction:', error);
@@ -760,10 +757,14 @@ Tanggal: {paymentDate}
     }
   };
   
-  const saveWhatsAppSettings = () => {
-    localStorage.setItem('whatsapp-settings', JSON.stringify(waSettings));
-    setShowSettingsDialog(false);
-    toast.success('Pengaturan WhatsApp berhasil disimpan');
+  const saveWhatsAppSettings = async () => {
+    try {
+      await saveTxnWaSetting.mutateAsync(waSettings);
+      setShowSettingsDialog(false);
+      toast.success('Pengaturan WhatsApp berhasil disimpan');
+    } catch (e) {
+      toast.error('Gagal menyimpan pengaturan WhatsApp');
+    }
   };
   
   const exportData = () => {
@@ -824,19 +825,23 @@ Tanggal: {paymentDate}
 
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 md:p-6 space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Transaksi Pembayaran Tagihan</h1>
-          <p className="text-gray-600">Pengelolaan data pembayaran tagihan pelanggan</p>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Transaksi Pembayaran</h1>
+          <p className="text-sm md:text-base text-gray-600">Pengelolaan pembayaran tagihan</p>
         </div>
         <div className="flex items-center space-x-2">
           <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings className="h-4 w-4 mr-2" />
-                Setting WhatsApp
+              <Button 
+                variant="outline" 
+                size="sm"
+                className="text-xs md:text-sm px-2 py-1 md:px-3 md:py-2"
+              >
+                <Settings className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                Setting WA
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
@@ -889,17 +894,20 @@ Tanggal: {paymentDate}
 
       {/* Filter & Controls Section */}
       <Card>
-        <CardHeader>
-          <CardTitle>Filter & Pencarian</CardTitle>
+        <CardHeader className="pb-3 md:pb-6">
+          <CardTitle className="text-lg md:text-xl">Filter & Pencarian</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3 md:space-y-4">
           {/* Baris 1: Button Pembayaran Baru, Pencarian, Export */}
-          <div className="flex flex-wrap items-center gap-4 mb-4">
+          <div className="flex flex-wrap items-center gap-2 md:gap-4 mb-3 md:mb-4">
             <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
               <DialogTrigger asChild>
-                <Button className="bg-blue-600 hover:bg-blue-700">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Pembayaran Baru
+                <Button 
+                  className="bg-blue-600 hover:bg-blue-700 text-xs md:text-sm px-2 py-1 md:px-4 md:py-2"
+                  size="sm"
+                >
+                  <Plus className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                  Pembayaran
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-6xl w-[50vw] max-h-[80vh] h-[90vh] overflow-y-auto">
@@ -1144,73 +1152,84 @@ Tanggal: {paymentDate}
                   placeholder="Cari nama, nopel, ppp secret, keterangan..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 w-full"
                 />
               </div>
             </div>
 
-            <Button variant="outline" className="bg-green-500 text-white hover:bg-green-600" onClick={exportData}>
+            <Button variant="outline" size="sm" className="bg-green-500 text-white hover:bg-green-600" onClick={exportData}>
               <Download className="h-4 w-4 mr-2" />
               Export Data
             </Button>
           </div>
 
-          {/* Baris 2: Filter Tanggal */}
-          <div className="flex flex-wrap items-center gap-4 mb-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium">Tanggal:</span>
+          {/* Baris 2: Filter Tanggal (Grid responsif) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 mb-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Tanggal Dari</Label>
               <Input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="w-40"
+                className="w-full"
               />
-              <span className="text-sm">s/d</span>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Tanggal Sampai</Label>
               <Input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="w-40"
+                className="w-full"
               />
             </div>
           </div>
 
-          {/* Baris 3: Filter Dropdown */}
-          <div className="flex flex-wrap gap-4">
-            <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Jenis Pembayaran" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Pembayaran</SelectItem>
-                <SelectItem value="cash">Tunai</SelectItem>
-                <SelectItem value="transfer">Transfer</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Baris 3: Filter Dropdown (Grid responsif dengan label) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Jenis Pembayaran</Label>
+              <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pilih jenis pembayaran" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Pembayaran</SelectItem>
+                  <SelectItem value="cash">Tunai</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <Select value={areaFilter} onValueChange={setAreaFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Wilayah" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Wilayah</SelectItem>
-                {areas.map(area => (
-                  <SelectItem key={area.id} value={area.name}>{area.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Wilayah</Label>
+              <Select value={areaFilter} onValueChange={setAreaFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pilih wilayah" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Wilayah</SelectItem>
+                  {areas.map(area => (
+                    <SelectItem key={area.id} value={area.name}>{area.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            <Select value={packageFilter} onValueChange={setPackageFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Paket" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Paket</SelectItem>
-                {packages.map(pkg => (
-                  <SelectItem key={pkg.id} value={pkg.name}>{pkg.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Paket</Label>
+              <Select value={packageFilter} onValueChange={setPackageFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pilih paket" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Paket</SelectItem>
+                  {packages.map(pkg => (
+                    <SelectItem key={pkg.id} value={pkg.name}>{pkg.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1297,15 +1316,15 @@ Tanggal: {paymentDate}
             <Table className="min-w-full">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12 whitespace-nowrap">No</TableHead>
+                  <TableHead className="w-12 whitespace-nowrap hidden md:table-cell">No</TableHead>
                   <TableHead className="whitespace-nowrap">Tanggal</TableHead>
                   <TableHead className="whitespace-nowrap">No. Pelanggan</TableHead>
                   <TableHead className="whitespace-nowrap">Nama Pelanggan</TableHead>
-                  <TableHead className="whitespace-nowrap">Area</TableHead>
-                  <TableHead className="whitespace-nowrap">Paket</TableHead>
+                  <TableHead className="whitespace-nowrap hidden md:table-cell">Area</TableHead>
+                  <TableHead className="whitespace-nowrap hidden md:table-cell">Paket</TableHead>
                   <TableHead className="whitespace-nowrap">Jumlah</TableHead>
                   <TableHead className="whitespace-nowrap">Metode</TableHead>
-                  <TableHead className="whitespace-nowrap">No. Nota</TableHead>
+                  <TableHead className="whitespace-nowrap hidden md:table-cell">No. Nota</TableHead>
                   <TableHead className="whitespace-nowrap">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1321,7 +1340,7 @@ Tanggal: {paymentDate}
                     const customer = customers.find(c => c.id === transaction.customerId);
                     return (
                       <TableRow key={transaction.id}>
-                        <TableCell className="whitespace-nowrap">{index + 1}</TableCell>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">{index + 1}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {new Date(transaction.createdAt).toLocaleDateString('id-ID')}
                         </TableCell>
@@ -1331,8 +1350,8 @@ Tanggal: {paymentDate}
                           </Badge>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{customer?.name}</TableCell>
-                        <TableCell className="whitespace-nowrap">{customer?.area}</TableCell>
-                        <TableCell className="whitespace-nowrap">{customer?.package}</TableCell>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">{customer?.area}</TableCell>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">{customer?.package}</TableCell>
                         <TableCell className="font-semibold whitespace-nowrap">
                           Rp {transaction.amount.toLocaleString('id-ID')}
                         </TableCell>
@@ -1344,7 +1363,7 @@ Tanggal: {paymentDate}
                             {transaction.method === 'cash' ? 'Tunai' : 'Transfer'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="whitespace-nowrap">
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">
                           <div className="flex items-center space-x-2">
                             <Badge variant="outline">{transaction.receiptNumber}</Badge>
                             <Button

@@ -16,9 +16,10 @@ interface ODPFormProps {
   onSubmit?: (odpData: any) => void;
   odp?: ODP;
   isEdit?: boolean;
+  existingODP?: ODP[];
 }
 
-export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps) => {
+export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false, existingODP = [] }: ODPFormProps) => {
   const [formData, setFormData] = useState({
     name: '',
     area: '', // Gunakan area sebagai field utama
@@ -30,6 +31,16 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
   });
 
   const { areas, loading: areasLoading } = useAreas();
+  
+  // Build existing markers from provided ODP list (exclude current editing ODP)
+  const existingMarkers = (existingODP || [])
+    .filter(o => o.coordinates && typeof o.coordinates.latitude === 'number' && typeof o.coordinates.longitude === 'number')
+    .filter(o => !(isEdit && odp && o.id === odp.id))
+    .map(o => ({
+      lat: o.coordinates!.latitude,
+      lng: o.coordinates!.longitude,
+      label: `${o.name} (${o.area})`
+    }));
 
   // Load ODP data when editing
   useEffect(() => {
@@ -184,16 +195,17 @@ export const ODPForm = ({ onClose, onSubmit, odp, isEdit = false }: ODPFormProps
 
               <div>
                 <Label>Koordinat Lokasi</Label>
-                <MapPicker
-                  latitude={formData.latitude}
-                  longitude={formData.longitude}
-                  onCoordinateChange={(lat, lng) => {
-                    handleInputChange('latitude', lat);
-                    handleInputChange('longitude', lng);
-                  }}
-                  height="300px"
-                />
-              </div>
+              <MapPicker
+                latitude={formData.latitude}
+                longitude={formData.longitude}
+                onCoordinateChange={(lat, lng) => {
+                  handleInputChange('latitude', lat);
+                  handleInputChange('longitude', lng);
+                }}
+                height="300px"
+                existingMarkers={existingMarkers}
+              />
+            </div>
 
               <div>
                 <Label htmlFor="status">Status</Label>
