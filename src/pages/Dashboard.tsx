@@ -29,6 +29,8 @@ import { usePackages } from '@/hooks/usePackages';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/utils/api';
 import { getCurrentJakartaTime, formatDateTimeForDisplay } from '../utils/timezone';
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 
 const Dashboard = () => {
   const { customers } = useCustomers();
@@ -37,6 +39,9 @@ const Dashboard = () => {
   const { packages } = usePackages();
   
   const [currentTime, setCurrentTime] = useState(getCurrentJakartaTime());
+  const [selectedRouterId, setSelectedRouterId] = useState<string>('');
+  const [selectedInterface, setSelectedInterface] = useState<string>('');
+  const [trafficHistory, setTrafficHistory] = useState<Array<{ t: number; rx: number; tx: number }>>([]);
   
   useEffect(() => {
     const timer = setInterval(() => {
@@ -53,13 +58,46 @@ const Dashboard = () => {
   
   // Extract transactions array from API response
   const transactions = transactionsResponse?.data || [];
+
+  const { data: interfacesResponse } = useQuery({
+    queryKey: ['routerInterfaces', selectedRouterId],
+    queryFn: () => api.getRouterInterfaces(selectedRouterId),
+    enabled: !!selectedRouterId,
+  });
+
+  const interfaces = interfacesResponse?.data || [];
+
+  const { data: trafficResponse } = useQuery({
+    queryKey: ['interfaceTraffic', selectedRouterId, selectedInterface],
+    queryFn: () => api.getRouterInterfaceTraffic(selectedRouterId, selectedInterface),
+    enabled: !!selectedRouterId && !!selectedInterface,
+    refetchInterval: 2000,
+  });
+
+  const rxBps = trafficResponse?.data?.rx || 0;
+  const txBps = trafficResponse?.data?.tx || 0;
+  const chartData = trafficHistory.map(p => ({ time: p.t, rxMbps: p.rx / 1_000_000, txMbps: p.tx / 1_000_000 }));
+
+  useEffect(() => {
+    if (selectedRouterId && selectedInterface) {
+      const t = Date.now();
+      setTrafficHistory(prev => {
+        const next = [...prev, { t, rx: rxBps, tx: txBps }];
+        return next.length > 30 ? next.slice(next.length - 30) : next;
+      });
+    }
+  }, [rxBps, txBps, selectedRouterId, selectedInterface]);
+
+  useEffect(() => {
+    setTrafficHistory([]);
+  }, [selectedRouterId, selectedInterface]);
   
   // Calculate metrics using correct status fields
   const totalCustomers = customers.length;
   
   // Active customers: those with 'lunas' billing status and 'active' service status
   const activeCustomers = customers.filter(c => 
-    c.billingStatus === 'lunas' && c.serviceStatus === 'active'
+    c.billingStatus === 'lunas' && c.serviceStatus === 'active' && c.status !== 'suspended'
   ).length;
   
   // Suspended customers: those with 'suspended' status or 'suspend' billing status
@@ -77,11 +115,11 @@ const Dashboard = () => {
     c.installationStatus === 'not_installed'
   ).length;
 
-  // Installed but inactive: those installed but service not active
+  // Installed but inactive: those installed but service not active (exclude suspended)
   const installedInactive = customers.filter(c => 
-    c.installationStatus === 'installed' && c.serviceStatus === 'inactive'
+    c.installationStatus === 'installed' && c.serviceStatus === 'inactive' && c.status !== 'suspended' && c.billingStatus !== 'suspend'
   ).length;
-
+  
   // Revenue calculations
   const currentMonth = getCurrentJakartaTime().getMonth();
   const currentYear = getCurrentJakartaTime().getFullYear();
@@ -449,6 +487,73 @@ const Dashboard = () => {
         </CardContent>
       </Card>
 
+
+      {/* Traffic Monitor */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Signal className="h-5 w-5" />
+            <span>Traffic Monitor (Ether)</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <div className="text-sm font-medium mb-1">Router</div>
+              <Select value={selectedRouterId} onValueChange={(val) => { setSelectedRouterId(val); setSelectedInterface(''); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih Router" />
+                </SelectTrigger>
+                <SelectContent>
+                  {routers.map((r) => (
+                    <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <div className="text-sm font-medium mb-1">Ether</div>
+              <Select value={selectedInterface} onValueChange={setSelectedInterface} disabled={!selectedRouterId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih Ether" />
+                </SelectTrigger>
+                <SelectContent>
+                  {interfaces.map((it: any) => (
+                    <SelectItem key={it.name} value={it.name}>{it.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <div className="text-xs text-gray-500">Polling tiap 2 detik, ringan di server</div>
+            </div>
+          </div>
+
+          <div className="mt-2">
+            <ResponsiveContainer width="100%" height={280}>
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="time" tickFormatter={(v) => new Date(v).toLocaleTimeString('id-ID', { minute: '2-digit', second: '2-digit' })} />
+                <YAxis unit="Mbps" domain={[0, 'dataMax']} allowDecimals tickFormatter={(v) => String(v)} />
+                <Tooltip formatter={(value: any) => [(Number(value).toFixed(2) + ' Mbps'), '']} labelFormatter={(label) => new Date(label).toLocaleTimeString('id-ID', { minute: '2-digit', second: '2-digit' })} />
+                <Legend />
+                <Area type="monotone" dataKey="rxMbps" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRx)" name="Rx" />
+                <Area type="monotone" dataKey="txMbps" stroke="#10b981" fillOpacity={1} fill="url(#colorTx)" name="Tx" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
 
     </div>
   );

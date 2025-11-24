@@ -255,6 +255,33 @@ export interface PPPSecret {
   disabled?: boolean;
 }
 
+export interface MessageLog {
+  id: number;
+  type: 'new_customer' | 'transaction' | 'manual';
+  customerId?: string;
+  phone: string;
+  chatId?: string;
+  message: string;
+  status: 'sent' | 'failed';
+  endpoint?: string;
+  session?: string;
+  error?: string;
+  metadata?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageTemplateModel {
+  id: number;
+  name: string;
+  content: string;
+  category: 'maintenance' | 'payment' | 'promotion' | 'general';
+  scope: 'broadcast' | 'transaction' | 'customer';
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Form types
 export interface RouterFormData {
   name: string;

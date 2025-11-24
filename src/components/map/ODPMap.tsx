@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet';
 import { Icon } from 'leaflet';
-import { ODP } from '@/types/isp';
+import { ODP, Customer } from '@/types/isp';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2, ArrowLeft, Map, Satellite, Maximize, Minimize } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import api from '@/utils/api';
 
 // Fix for default markers in react-leaflet
 delete (Icon.Default.prototype as any)._getIconUrl;
@@ -40,6 +42,9 @@ interface ODPMapProps {
   onEdit?: (odp: ODP) => void;
   onDelete?: (odp: ODP) => void;
   onBack?: () => void;
+  initialFullscreen?: boolean;
+  initialODPId?: number;
+  centerOverride?: [number, number];
 }
 
 export const ODPMap: React.FC<ODPMapProps> = ({ 
@@ -49,10 +54,50 @@ export const ODPMap: React.FC<ODPMapProps> = ({
   height = '500px',
   onEdit,
   onDelete,
-  onBack
+  onBack,
+  initialFullscreen,
+  initialODPId,
+  centerOverride
 }) => {
   const [mapLayer, setMapLayer] = useState<'street' | 'satellite'>('street');
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(!!initialFullscreen);
+  // Tambahan state untuk dialog pelanggan ODP
+  const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
+  const [selectedODP, setSelectedODP] = useState<ODP | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
+  const [customerError, setCustomerError] = useState<string | null>(null);
+
+  const openCustomersDialog = async (odp: ODP) => {
+    setSelectedODP(odp);
+    setIsCustomerDialogOpen(true);
+    setIsLoadingCustomers(true);
+    setCustomerError(null);
+    try {
+      const resp = await api.getODPCustomers(String(odp.id));
+      if ((resp as any)?.success === false) {
+        setCustomerError(resp.message || 'Gagal mengambil data pelanggan ODP');
+        setCustomers([]);
+      } else {
+        setCustomers(resp.data || []);
+      }
+    } catch (e: any) {
+      setCustomerError(e?.message || 'Terjadi kesalahan saat memuat pelanggan');
+      setCustomers([]);
+    } finally {
+      setIsLoadingCustomers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (initialODPId) {
+      const found = odps.find(o => o.id === initialODPId);
+      if (found) {
+        openCustomersDialog(found);
+      }
+    }
+  }, [initialODPId, odps]);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
@@ -69,13 +114,13 @@ export const ODPMap: React.FC<ODPMapProps> = ({
   // Filter ODPs that have coordinates
   const odpsWithCoordinates = odps.filter(odp => odp.coordinates);
 
-  // Calculate center based on ODP locations if available
-  const mapCenter = odpsWithCoordinates.length > 0 
+  // Calculate center based on ODP locations if available, with override support
+  const mapCenter = centerOverride ?? (odpsWithCoordinates.length > 0 
     ? [
         odpsWithCoordinates.reduce((sum, odp) => sum + odp.coordinates!.latitude, 0) / odpsWithCoordinates.length,
         odpsWithCoordinates.reduce((sum, odp) => sum + odp.coordinates!.longitude, 0) / odpsWithCoordinates.length
       ] as [number, number]
-    : center;
+    : center);
 
   return (
     <div 
@@ -247,6 +292,17 @@ export const ODPMap: React.FC<ODPMapProps> = ({
                     </div>
                   </div>
                   
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs"
+                      onClick={() => openCustomersDialog(odp)}
+                    >
+                      👥 Lihat pelanggan ODP
+                    </Button>
+                  </div>
+                  
                   <a 
                     href={`https://www.google.com/maps?q=${odp.coordinates!.latitude},${odp.coordinates!.longitude}`}
                     target="_blank"
@@ -255,13 +311,68 @@ export const ODPMap: React.FC<ODPMapProps> = ({
                   >
                     📍 Google Maps
                   </a>
+
+                  <div className="mt-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="w-full text-xs bg-blue-600 hover:bg-blue-700"
+                      onClick={() => window.open(`/odp/full?odpId=${odp.id}`, '_blank')}
+                    >
+                      🖥️ Peta layar penuh
+                    </Button>
+                  </div>
                 </div>
               </Popup>
             </Marker>
           ))}
         </>
       </MapContainer>
-      
+
+      <Dialog open={isCustomerDialogOpen} onOpenChange={setIsCustomerDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {selectedODP ? `Pelanggan di ${selectedODP.name}` : 'Daftar Pelanggan ODP'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedODP ? `Area: ${selectedODP.area} • Utilisasi: ${Math.round((selectedODP.usedSlots / selectedODP.totalSlots) * 100)}%` : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingCustomers && (
+            <p className="text-sm text-gray-600">Memuat data pelanggan...</p>
+          )}
+
+          {!isLoadingCustomers && customerError && (
+            <p className="text-sm text-red-600">{customerError}</p>
+          )}
+
+          {!isLoadingCustomers && !customerError && (
+            <div className="space-y-2 max-h-[50vh] overflow-auto">
+              {customers.length === 0 ? (
+                <p className="text-sm text-gray-600">Belum ada pelanggan di ODP ini.</p>
+              ) : (
+                customers.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between border rounded px-2 py-1">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{c.name}</p>
+                      <p className="text-[11px] text-gray-600">{c.customerNumber} • {c.phone}</p>
+                      <p className="text-[11px] text-gray-500 truncate">{c.address}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[11px]"><span className="font-semibold">Status:</span> {c.status}</p>
+                      <p className="text-[11px]"><span className="font-semibold">Service:</span> {c.serviceStatus}</p>
+                      <p className="text-[11px]"><span className="font-semibold">MikroTik:</span> {c.mikrotikStatus}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {odpsWithCoordinates.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50 rounded-lg border z-10">
           <div className="text-center text-gray-500">

@@ -320,6 +320,8 @@ router.post('/suspend-overdue', async (req, res) => {
               await customer.update({
                 billingStatus: 'suspend',
                 mikrotikStatus: 'disabled',
+                serviceStatus: 'inactive',
+                status: 'suspended',
                 lastSuspendDate: currentDate.toDate()
               });
               
@@ -410,6 +412,8 @@ router.post('/test-suspend/:customerId', async (req, res) => {
         await customer.update({
           billingStatus: 'suspend',
           mikrotikStatus: 'disabled',
+          serviceStatus: 'inactive',
+          status: 'suspended',
           lastSuspendDate: getJakartaTime().toDate()
         });
         
@@ -423,7 +427,9 @@ router.post('/test-suspend/:customerId', async (req, res) => {
               pppSecret: customer.pppSecret,
               router: customer.router,
               billingStatus: 'suspend',
-              mikrotikStatus: 'disabled'
+              mikrotikStatus: 'disabled',
+              serviceStatus: 'inactive',
+              status: 'suspended'
             },
             mikrotikResult: disableResult,
             timestamp: getJakartaTime().format('YYYY-MM-DD HH:mm:ss')
@@ -500,8 +506,9 @@ router.post('/test-enable/:customerId', async (req, res) => {
         // Update customer status
         await customer.update({
           billingStatus: 'lunas',
-          mikrotikStatus: 'enabled',
-          serviceStatus: 'active'
+          mikrotikStatus: 'active',
+          serviceStatus: 'active',
+          status: 'active'
         });
         
         res.json({
@@ -514,8 +521,9 @@ router.post('/test-enable/:customerId', async (req, res) => {
               pppSecret: customer.pppSecret,
               router: customer.router,
               billingStatus: 'lunas',
-              mikrotikStatus: 'enabled',
-              serviceStatus: 'active'
+              mikrotikStatus: 'active',
+              serviceStatus: 'active',
+              status: 'active'
             },
             mikrotikResult: enableResult,
             timestamp: getJakartaTime().format('YYYY-MM-DD HH:mm:ss')
@@ -608,6 +616,8 @@ router.post('/test-suspend-by-name', async (req, res) => {
         await customer.update({
           billingStatus: 'suspend',
           mikrotikStatus: 'disabled',
+          serviceStatus: 'inactive',
+          status: 'suspended',
           lastSuspendDate: getJakartaTime().toDate()
         });
         
@@ -621,7 +631,9 @@ router.post('/test-suspend-by-name', async (req, res) => {
               pppSecret: customer.pppSecret,
               router: customer.router,
               billingStatus: 'suspend',
-              mikrotikStatus: 'disabled'
+              mikrotikStatus: 'disabled',
+              serviceStatus: 'inactive',
+              status: 'suspended'
             },
             mikrotikResult: disableResult,
             timestamp: getJakartaTime().format('YYYY-MM-DD HH:mm:ss')
@@ -713,8 +725,9 @@ router.post('/test-enable-by-name', async (req, res) => {
         // Update customer status
         await customer.update({
           billingStatus: 'lunas',
-          mikrotikStatus: 'enabled',
-          serviceStatus: 'active'
+          mikrotikStatus: 'active',
+          serviceStatus: 'active',
+          status: 'active'
         });
         
         res.json({
@@ -727,8 +740,9 @@ router.post('/test-enable-by-name', async (req, res) => {
               pppSecret: customer.pppSecret,
               router: customer.router,
               billingStatus: 'lunas',
-              mikrotikStatus: 'enabled',
-              serviceStatus: 'active'
+              mikrotikStatus: 'active',
+              serviceStatus: 'active',
+              status: 'active'
             },
             mikrotikResult: enableResult,
             timestamp: getJakartaTime().format('YYYY-MM-DD HH:mm:ss')

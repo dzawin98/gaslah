@@ -18,6 +18,7 @@ import Messages from "./pages/Messages";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import ODP from "./pages/ODP";
+import ODPMapFull from "./pages/ODPMapFull";
 import Receipt from '@/pages/Receipt';
 import Reports from "./pages/Reports";
 import CommissionReports from "./pages/CommissionReports";
@@ -65,6 +66,7 @@ const App = () => {
                   <Route path="/routers" element={<RequireAuth><Routers /></RequireAuth>} />
                   <Route path="/areas" element={<RequireAuth><Areas /></RequireAuth>} />
                   <Route path="/odp" element={<RequireAuth><ODP /></RequireAuth>} />
+                  <Route path="/odp/full" element={<RequireAuth><ODPMapFull /></RequireAuth>} />
                   <Route path="/packages" element={<RequireAuth><Packages /></RequireAuth>} />
                   <Route path="/messages" element={<RequireAuth><Messages /></RequireAuth>} />
                   {/* Remove this route */}

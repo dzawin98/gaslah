@@ -10,8 +10,7 @@ export const useAppSetting = <T = any>(key: string, defaultValue?: T) => {
     queryFn: async () => {
       try {
         const res = await api.get(`/settings/${key}`);
-        // Backend returns { success, data: { key, value } }
-        const payload = (res?.data?.data ?? res?.data) as { key?: string; value?: any };
+        const payload = res as { key?: string; value?: any };
         const value = payload?.value ?? undefined;
         return { key, value };
       } catch (err) {

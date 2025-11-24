@@ -342,7 +342,8 @@ Link Nota: {receiptUrl}`,
   
 
   
-  const handleInputChange = (field: string, value: any) => {
+  type FieldValue = string | number | boolean | Date | null;
+  const handleInputChange = (field: string, value: FieldValue) => {
     if (field.includes('.')) {
       const [parent, child] = field.split('.');
       setFormData(prev => {
@@ -392,6 +393,10 @@ Link Nota: {receiptUrl}`,
       return;
     }
     
+    // Siapkan variabel agar bisa dipakai di catch
+    let chatId = '';
+    let message = '';
+
     try {
       // Check WAHA config from hook
       if (!wahaConfig || !wahaConfig.baseUrl || !wahaConfig.session) {
@@ -402,7 +407,7 @@ Link Nota: {receiptUrl}`,
       
       // Format phone number (remove +, spaces, etc.)
       const formattedPhone = customer.phone.replace(/[^0-9]/g, '');
-      const chatId = formattedPhone.startsWith('62') ? 
+      chatId = formattedPhone.startsWith('62') ? 
         `${formattedPhone}@c.us` : 
         `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
       
@@ -418,8 +423,19 @@ Link Nota: {receiptUrl}`,
         periodText = `${new Date(transaction.period.from).toLocaleDateString('id-ID')} - ${new Date(transaction.period.to).toLocaleDateString('id-ID')}`;
       }
       
+      // Ambil template aktif dari DB (scope: transaction) jika tersedia
+      try {
+        const tmplResp = await api.getMessageTemplates({ scope: 'transaction', isActive: true, limit: 1 });
+        const tmpl = tmplResp.data && tmplResp.data[0];
+        if (tmpl && tmpl.content) {
+          waSettings.paymentMessageTemplate = tmpl.content;
+        }
+      } catch (err) {
+        console.error('Gagal memuat template transaksi dari database', err);
+      }
+
       // Replace placeholders in template
-      let message = waSettings.paymentMessageTemplate
+      message = waSettings.paymentMessageTemplate
         .replace(/{customerName}/g, customer.name)
         .replace(/{area}/g, customer.area || '')
         .replace(/{customerNumber}/g, customer.customerNumber || '')
@@ -496,6 +512,18 @@ Link Nota: {receiptUrl}`,
             const result = await response.json();
             console.log(`WhatsApp notification sent successfully via endpoint ${i + 1}:`, result);
             toast.success(`Notifikasi WhatsApp berhasil dikirim ke ${customer.name}`);
+            try {
+              await api.createMessageLog({
+                type: 'transaction',
+                customerId: String(customer.id),
+                phone: customer.phone,
+                chatId,
+                message,
+                status: 'sent'
+              });
+            } catch (err) {
+              console.error('Gagal menyimpan log pesan transaksi (sent)', err);
+            }
             return true;
           } else {
             console.log(`Endpoint ${i + 1} gagal:`, response.status, response.statusText);
@@ -507,11 +535,24 @@ Link Nota: {receiptUrl}`,
       
       throw new Error('Semua endpoint gagal. Periksa konfigurasi WAHA API.');
       
-    } catch (error) {
-      console.warn('WhatsApp notification failed:', error);
-      toast.error('Gagal mengirim notifikasi WhatsApp');
-      return false;
-    }
+      } catch (error) {
+        console.warn('WhatsApp notification failed:', error);
+        toast.error('Gagal mengirim notifikasi WhatsApp');
+        try {
+          await api.createMessageLog({
+            type: 'transaction',
+            customerId: String(customer.id),
+            phone: customer.phone,
+            chatId,
+            message,
+            status: 'failed',
+            error: (error as Error).message
+          });
+        } catch (err) {
+          console.error('Gagal menyimpan log pesan transaksi (failed)', err);
+        }
+        return false;
+      }
   };
     const generateReceiptNumber = (existingTransactions: Transaction[]): string => {
     // Ambil semua receiptNumber yang sudah ada dengan format LTS dan extract nomor urut
@@ -642,7 +683,9 @@ Link Nota: {receiptUrl}`,
             // Inform ODP consumers that customer updates may affect ODP utilization
             try {
               window.dispatchEvent(new CustomEvent('odpRefresh'));
-            } catch {}
+            } catch (err) {
+              console.error('Gagal memicu event refresh ODP', err);
+            }
             
             // TODO: Aktifkan kembali PPP Secret di MikroTik
             // await mikrotikAPI.enablePPPSecret(customer.router, customer.pppSecret);

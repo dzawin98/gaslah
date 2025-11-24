@@ -122,6 +122,10 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
       return;
     }
 
+    // Siapkan variabel agar bisa dipakai di catch
+    let chatId = '';
+    let message = '';
+
     try {
       // Ganti bagian localStorage dengan hook:
       if (!wahaConfig || !wahaConfig.baseUrl || !wahaConfig.session) {
@@ -132,12 +136,23 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
 
       // Format phone number (remove +, spaces, etc.)
       const formattedPhone = customerData.phone?.replace(/[^0-9]/g, '') || '';
-      const chatId = formattedPhone.startsWith('62') ? 
+      chatId = formattedPhone.startsWith('62') ? 
         `${formattedPhone}@c.us` : 
         `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
 
+      // Ambil template aktif dari DB (scope: customer) jika tersedia
+      try {
+        const tmplResp = await api.getMessageTemplates({ scope: 'customer', isActive: true, limit: 1 });
+        const tmpl = tmplResp.data && tmplResp.data[0];
+        if (tmpl && tmpl.content) {
+          waSettings.newCustomerMessageTemplate = tmpl.content;
+        }
+      } catch (err) {
+        console.error('Gagal memuat template pelanggan dari database', err);
+      }
+
       // Replace placeholders in template
-      let message = waSettings.newCustomerMessageTemplate
+      message = waSettings.newCustomerMessageTemplate
         .replace(/{customerName}/g, customerData.name || '')
         .replace(/{customerNumber}/g, customerData.customerNumber || '')
         .replace(/{packageName}/g, customerData.package || '')
@@ -212,6 +227,18 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
             const result = await response.json();
             console.log(`WhatsApp notification sent successfully via endpoint ${i + 1}:`, result);
             toast.success(`Notifikasi WhatsApp berhasil dikirim ke ${customerData.name}`);
+            try {
+              await api.createMessageLog({
+                type: 'new_customer',
+                customerId: String(customerData.id || ''),
+                phone: customerData.phone || '',
+                chatId,
+                message,
+                status: 'sent'
+              });
+            } catch (err) {
+              console.error('Gagal menyimpan log pesan pelanggan (sent)', err);
+            }
             return true;
           } else {
             console.log(`Endpoint ${i + 1} gagal:`, response.status, response.statusText);
@@ -226,6 +253,19 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
     } catch (error) {
       console.warn('WhatsApp welcome message failed:', error);
       toast.error('Gagal mengirim pesan WhatsApp');
+      try {
+        await api.createMessageLog({
+          type: 'new_customer',
+          customerId: String(customerData.id || ''),
+          phone: customerData.phone || '',
+          chatId,
+          message,
+          status: 'failed',
+          error: (error as Error).message
+        });
+      } catch (err) {
+        console.error('Gagal menyimpan log pesan pelanggan (failed)', err);
+      }
       return false;
     }
   };
@@ -405,7 +445,7 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
           matchesStatus = customer.installationStatus === 'not_installed';
           break;
         case 'terpasang_belum_aktif':
-          matchesStatus = customer.installationStatus === 'installed' && customer.serviceStatus === 'inactive';
+          matchesStatus = customer.installationStatus === 'installed' && customer.serviceStatus === 'inactive' && customer.status !== 'suspended' && customer.billingStatus !== 'suspend';
           break;
         default:
           matchesStatus = true;
@@ -861,9 +901,10 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
                             initialStatus={customer.mikrotikStatus}
                             onStatusChange={() => {
                               try {
-                                // Segarkan daftar pelanggan agar mikrotikStatus terbaru tercermin
-                                refreshCustomers();
-                              } catch {}
+                                console.log('PPP status changed');
+                              } catch (err) {
+                                console.error('Error on PPP status change handler', err);
+                              }
                             }}
                           />
                         </TableCell>
@@ -1031,4 +1072,4 @@ Terima kasih telah bergabung dengan LATANSA NETWORKS!`,
 };
 
 export default Customers;
-
+

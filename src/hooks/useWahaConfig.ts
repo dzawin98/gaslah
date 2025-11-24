@@ -5,7 +5,8 @@ import { api } from '@/utils/api';
 const DEFAULT_WAHA_CONFIG = {
   baseUrl: 'https://whatsapp.latansa.my.id',
   session: 'default',
-  apiKey: '3b0de781f77844f6953060226a24b56d'
+  apiKey: '3b0de781f77844f6953060226a24b56d',
+  sendDelayMs: 5000
 };
 
 export const useWahaConfig = () => {
@@ -15,8 +16,7 @@ export const useWahaConfig = () => {
     queryKey: ['wahaConfig'],
     queryFn: async () => {
       try {
-        const response = await api.get('/settings/waha');
-        const payload = response?.data?.data ?? response?.data ?? response;
+        const payload = await api.get('/waha-config');
         const merged = {
           ...DEFAULT_WAHA_CONFIG,
           ...payload,
@@ -25,7 +25,8 @@ export const useWahaConfig = () => {
           baseUrl:
             !payload?.baseUrl || payload?.baseUrl === 'http://localhost:3000'
               ? DEFAULT_WAHA_CONFIG.baseUrl
-              : payload?.baseUrl
+              : payload?.baseUrl,
+          sendDelayMs: typeof payload?.sendDelayMs === 'number' ? payload.sendDelayMs : DEFAULT_WAHA_CONFIG.sendDelayMs
         };
         return merged;
       } catch (error) {
@@ -38,11 +39,10 @@ export const useWahaConfig = () => {
 
   const updateConfig = useMutation({
     mutationFn: async (newConfig: any) => {
-      const response = await api.put('/settings/waha', newConfig);
-      return response?.data ?? response;
+      const saved = await api.put('/waha-config', newConfig);
+      return saved;
     },
-    onSuccess: (data) => {
-      const payload = data?.data ?? data;
+    onSuccess: (payload) => {
       const merged = {
         ...DEFAULT_WAHA_CONFIG,
         ...payload,
@@ -51,7 +51,8 @@ export const useWahaConfig = () => {
         baseUrl:
           !payload?.baseUrl || payload?.baseUrl === 'http://localhost:3000'
             ? DEFAULT_WAHA_CONFIG.baseUrl
-            : payload?.baseUrl
+            : payload?.baseUrl,
+        sendDelayMs: typeof payload?.sendDelayMs === 'number' ? payload.sendDelayMs : DEFAULT_WAHA_CONFIG.sendDelayMs
       };
       queryClient.setQueryData(['wahaConfig'], merged);
     },

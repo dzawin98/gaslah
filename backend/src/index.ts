@@ -29,6 +29,7 @@ app.use(cors({
     'https://billing.latansa.my.id',
     'http://billing.latansa.my.id',
     'http://localhost:8080',
+    'http://localhost:8081',
     'http://localhost:3001',
     'https://api.latansa.my.id'
   ],
@@ -649,6 +650,196 @@ app.post('/api/routers/:id/test-connection', async (req: Request, res: Response)
   }
 });
 
+// Get ethernet interfaces from router
+app.get('/api/routers/:id/interfaces', async (req: Request, res: Response) => {
+  try {
+    const router = await db.Router.findByPk(req.params.id);
+    if (!router) {
+      return res.status(404).json({ success: false, message: 'Router not found' });
+    }
+
+    try {
+      const conn = new RouterOSAPI({
+        host: router.ipAddress,
+        user: router.username,
+        password: router.password,
+        port: router.port || 8728,
+        timeout: 5000
+      });
+
+      await conn.connect();
+      const interfaces = await conn.write('/interface/print');
+      await conn.close();
+
+      const ethernetInterfaces = interfaces
+        .filter((it: any) => typeof it.name === 'string' && it.name.startsWith('ether'))
+        .map((it: any) => ({
+          name: it.name,
+          disabled: it.disabled === 'true' || it.disabled === true,
+          comment: it.comment || ''
+        }));
+
+      return res.json({ success: true, data: ethernetInterfaces });
+    } catch (connectionError: any) {
+      return res.json({ success: true, data: [] });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch interfaces', error: error.message });
+  }
+});
+
+// Get monitor traffic for a specific interface
+app.get('/api/routers/:id/interface-traffic', async (req: Request, res: Response) => {
+  try {
+    const router = await db.Router.findByPk(req.params.id);
+    if (!router) {
+      return res.status(404).json({ success: false, message: 'Router not found' });
+    }
+
+    const interfaceName = typeof req.query.interface === 'string' ? req.query.interface : '';
+    if (!interfaceName) {
+      return res.status(400).json({ success: false, message: 'interface parameter is required' });
+    }
+
+    try {
+      const conn = new RouterOSAPI({
+        host: router.ipAddress,
+        user: router.username,
+        password: router.password,
+        port: router.port || 8728,
+        timeout: 5000
+      });
+
+      await conn.connect();
+      const result = await conn.write('/interface/monitor-traffic', [
+        '=interface=' + interfaceName,
+        '=once='
+      ]);
+      await conn.close();
+
+      const rx = Number(result?.[0]?.['rx-bits-per-second'] || 0);
+      const tx = Number(result?.[0]?.['tx-bits-per-second'] || 0);
+
+      return res.json({ success: true, data: { rx, tx, interface: interfaceName } });
+    } catch (connectionError: any) {
+      return res.json({ success: true, data: { rx: 0, tx: 0, interface: interfaceName } });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch traffic', error: error.message });
+  }
+});
+
+// Message logs - create
+app.post('/api/message-logs', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body;
+    const log = await db.MessageLog.create({
+      type: payload.type,
+      customerId: payload.customerId || null,
+      phone: payload.phone,
+      chatId: payload.chatId || null,
+      message: payload.message,
+      status: payload.status,
+      endpoint: payload.endpoint || null,
+      session: payload.session || null,
+      error: payload.error || null,
+      metadata: payload.metadata ? JSON.stringify(payload.metadata) : null
+    });
+    res.status(201).json({ success: true, data: log });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to create message log', error: error.message });
+  }
+});
+
+// Message logs - list
+app.get('/api/message-logs', async (req: Request, res: Response) => {
+  try {
+    const { type, status, customerId, phone, limit } = req.query as any;
+    const where: any = {};
+    if (type) where.type = type;
+    if (status) where.status = status;
+    if (customerId) where.customerId = customerId;
+    if (phone) where.phone = phone;
+    const logs = await db.MessageLog.findAll({
+      where,
+      order: [['createdAt', 'DESC']],
+      limit: limit ? parseInt(limit) : 100
+    });
+    res.json({ success: true, data: logs });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to fetch message logs', error: error.message });
+  }
+});
+
+// Message templates - list
+app.get('/api/message-templates', async (req: Request, res: Response) => {
+  try {
+    const { scope, category, isActive, limit } = req.query as any;
+    const where: any = {};
+    if (scope) where.scope = scope;
+    if (category) where.category = category;
+    if (typeof isActive !== 'undefined') where.isActive = String(isActive) === 'true';
+    const templates = await db.MessageTemplate.findAll({
+      where,
+      order: [['updatedAt', 'DESC']],
+      limit: limit ? parseInt(limit) : undefined
+    });
+    res.json({ success: true, data: templates });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to fetch message templates', error: error.message });
+  }
+});
+
+// Message templates - create
+app.post('/api/message-templates', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body;
+    const template = await db.MessageTemplate.create({
+      name: payload.name,
+      content: payload.content,
+      category: payload.category || 'general',
+      scope: payload.scope || 'broadcast',
+      isActive: typeof payload.isActive === 'boolean' ? payload.isActive : true
+    });
+    res.status(201).json({ success: true, data: template });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to create message template', error: error.message });
+  }
+});
+
+// Message templates - update
+app.put('/api/message-templates/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const payload = req.body;
+    const template = await db.MessageTemplate.findByPk(id);
+    if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
+    await template.update({
+      name: payload.name ?? template.name,
+      content: payload.content ?? template.content,
+      category: payload.category ?? template.category,
+      scope: payload.scope ?? template.scope,
+      isActive: typeof payload.isActive === 'boolean' ? payload.isActive : template.isActive
+    });
+    res.json({ success: true, data: template });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to update message template', error: error.message });
+  }
+});
+
+// Message templates - delete
+app.delete('/api/message-templates/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const template = await db.MessageTemplate.findByPk(id);
+    if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
+    await template.destroy();
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to delete message template', error: error.message });
+  }
+});
+
 // Get PPP secrets from router
 app.get('/api/routers/:id/ppp-secrets', async (req: Request, res: Response) => {
   try {
@@ -784,7 +975,7 @@ app.post('/api/mikrotik/ppp/disable/:customerId', async (req: Request, res: Resp
     const result = await mikrotikAPI.disablePPPSecret(routerName, username);
 
     if (result.success) {
-      await customer.update({ mikrotikStatus: 'disabled', serviceStatus: 'inactive' });
+      await customer.update({ mikrotikStatus: 'disabled', serviceStatus: 'inactive', status: 'suspended' });
       return res.json({ success: true, message: 'PPP user disabled', data: { mikrotikResult: result } });
     }
 
@@ -821,7 +1012,7 @@ app.post('/api/mikrotik/ppp/enable/:customerId', async (req: Request, res: Respo
     const result = await mikrotikAPI.enablePPPSecret(routerName, username);
 
     if (result.success) {
-      await customer.update({ mikrotikStatus: 'active', serviceStatus: 'active' });
+      await customer.update({ mikrotikStatus: 'active', serviceStatus: 'active', status: 'active' });
       return res.json({ success: true, message: 'PPP user enabled', data: { mikrotikResult: result } });
     }
 
@@ -878,16 +1069,35 @@ app.get('/api/odps', async (req: Request, res: Response) => {
     const odps = await db.ODP.findAll({
       order: [['createdAt', 'DESC']]
     });
+
+    // Ambil jumlah pelanggan per ODP secara real-time agar usedSlots selalu sinkron
+    const customerCounts = await db.Customer.findAll({
+      attributes: [
+        'odpId',
+        [db.Sequelize.fn('COUNT', db.Sequelize.col('id')), 'count']
+      ],
+      where: { odpId: { [db.Sequelize.Op.ne]: null } },
+      group: ['odpId']
+    });
+    const countMap: Record<string, number> = {};
+    for (const row of customerCounts) {
+      const key = String(row.get('odpId'));
+      countMap[key] = Number(row.get('count'));
+    }
     
-    // Transform data untuk menambahkan availableSlots
-    const transformedOdps = odps.map((odp: any) => ({
-      ...odp.toJSON(),
-      availableSlots: odp.totalSlots - odp.usedSlots,
-      coordinates: odp.latitude && odp.longitude ? {
-        latitude: parseFloat(odp.latitude),
-        longitude: parseFloat(odp.longitude)
-      } : null
-    }));
+    // Transform data: sinkronkan usedSlots dan availableSlots dengan data pelanggan
+    const transformedOdps = odps.map((odp: any) => {
+      const used = countMap[String(odp.id)] || 0;
+      return {
+        ...odp.toJSON(),
+        usedSlots: used,
+        availableSlots: (odp.totalSlots || 0) - used,
+        coordinates: odp.latitude && odp.longitude ? {
+          latitude: parseFloat(odp.latitude),
+          longitude: parseFloat(odp.longitude)
+        } : null
+      };
+    });
     
     res.json({
       success: true,
@@ -959,9 +1169,12 @@ app.post('/api/odps', async (req: Request, res: Response) => {
     });
     
     // Transform response
+    const used = await db.Customer.count({ where: { odpId: odp.id } });
+
     const transformedOdp = {
       ...odp.toJSON(),
-      availableSlots: odp.totalSlots - odp.usedSlots,
+      usedSlots: used,
+      availableSlots: (odp.totalSlots || 0) - used,
       coordinates: odp.latitude && odp.longitude ? {
         latitude: parseFloat(odp.latitude),
         longitude: parseFloat(odp.longitude)
@@ -1017,6 +1230,22 @@ app.get('/api/odps/:id', async (req: Request, res: Response) => {
       message: 'Failed to fetch ODP', 
       error: error.message 
     });
+  }
+});
+
+// Get customers by ODP id
+app.get('/api/odps/:id/customers', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const customers = await db.Customer.findAll({
+      where: { odpId: id },
+      attributes: ['id', 'customerNumber', 'name', 'status', 'billingStatus', 'mikrotikStatus', 'serviceStatus', 'package', 'phone', 'address'],
+      order: [['name', 'ASC']]
+    });
+    return res.json({ success: true, data: customers });
+  } catch (error: any) {
+    console.error('Error fetching customers by ODP:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch customers by ODP', error: error.message });
   }
 });
 
@@ -2121,12 +2350,12 @@ app.get('/api/settings/waha', async (req: Request, res: Response) => {
 app.put('/api/settings/waha', async (req: Request, res: Response) => {
   try {
     const wahaConfig = req.body;
-    
+
     await db.Settings.upsert({
       key: 'waha',
       value: JSON.stringify(wahaConfig)
     });
-    
+
     res.json({
       success: true,
       data: wahaConfig,
@@ -2142,6 +2371,70 @@ app.put('/api/settings/waha', async (req: Request, res: Response) => {
   }
 });
 
+// WAHA Config dedicated endpoints
+app.get('/api/waha-config', async (req: Request, res: Response) => {
+  try {
+    let config = await db.WahaConfig.findOne({ order: [['createdAt', 'DESC']] });
+    if (!config) {
+      const legacy = await db.Settings.findByPk('waha');
+      if (legacy && legacy.value) {
+        try {
+          const v = JSON.parse(legacy.value);
+          config = await db.WahaConfig.create({
+            baseUrl: v.baseUrl || '',
+            session: v.session || '',
+            apiKey: v.apiKey || '',
+            sendDelayMs: typeof v.sendDelayMs === 'number' ? v.sendDelayMs : 5000
+          });
+        } catch {}
+      }
+    }
+
+    if (!config) {
+      return res.json({
+        success: true,
+        data: {
+          baseUrl: 'https://whatsapp.latansa.my.id',
+          session: 'default',
+          apiKey: '',
+          sendDelayMs: 5000
+        }
+      });
+    }
+
+    res.json({ success: true, data: config });
+  } catch (error: any) {
+    console.error('Error fetching WAHA config (table):', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch WAHA config', error: error.message });
+  }
+});
+
+app.put('/api/waha-config', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body;
+    let config = await db.WahaConfig.findOne({ order: [['createdAt', 'DESC']] });
+    if (!config) {
+      config = await db.WahaConfig.create({
+        baseUrl: payload.baseUrl || '',
+        session: payload.session || '',
+        apiKey: payload.apiKey || '',
+        sendDelayMs: typeof payload.sendDelayMs === 'number' ? payload.sendDelayMs : 5000
+      });
+    } else {
+      await config.update({
+        baseUrl: payload.baseUrl ?? config.baseUrl,
+        session: payload.session ?? config.session,
+        apiKey: payload.apiKey ?? config.apiKey,
+        sendDelayMs: typeof payload.sendDelayMs === 'number' ? payload.sendDelayMs : config.sendDelayMs
+      });
+    }
+
+    res.json({ success: true, data: config });
+  } catch (error: any) {
+    console.error('Error saving WAHA config (table):', error);
+    res.status(500).json({ success: false, message: 'Failed to save WAHA config', error: error.message });
+  }
+});
 // Sales endpoints
 app.get('/api/sales', async (req, res) => {
   try {

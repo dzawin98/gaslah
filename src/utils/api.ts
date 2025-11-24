@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { RouterDevice, Area, ODP, Package, Customer, Transaction, MikrotikProfile, Sales, PPPSecret } from '@/types/isp';
+import { RouterDevice, Area, ODP, Package, Customer, Transaction, MikrotikProfile, Sales, PPPSecret, MessageLog, MessageTemplateModel } from '@/types/isp';
 
 // Temporary voucher types until they are properly defined in types/isp.ts
 interface VoucherProfile {
@@ -50,7 +50,11 @@ interface DashboardStats {
   totalRouters: number;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.latansa.my.id/api';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:3001/api'
+    : 'https://api.latansa.my.id/api');
 
 // Create axios instance
 const apiClient = axios.create({
@@ -114,6 +118,92 @@ const testRouterConnection = async (id: string): Promise<ApiResponse<{ status: s
   }
 };
 
+const getRouterInterfaces = async (id: string): Promise<ApiResponse<Array<{ name: string; disabled?: boolean; comment?: string }>>> => {
+  try {
+    const response = await apiClient.get(`/routers/${id}/interfaces`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching router interfaces:', error);
+    throw error;
+  }
+};
+
+const getRouterInterfaceTraffic = async (
+  id: string,
+  interfaceName: string
+): Promise<ApiResponse<{ rx: number; tx: number; interface: string }>> => {
+  try {
+    const response = await apiClient.get(`/routers/${id}/interface-traffic`, {
+      params: { interface: interfaceName }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching interface traffic:', error);
+    throw error;
+  }
+};
+
+const createMessageLog = async (log: Omit<MessageLog, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<MessageLog>> => {
+  try {
+    const response = await apiClient.post('/message-logs', log);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating message log:', error);
+    throw error;
+  }
+};
+
+const getMessageLogs = async (params?: { type?: string; status?: string; customerId?: string; phone?: string; limit?: number }): Promise<ApiResponse<MessageLog[]>> => {
+  try {
+    const response = await apiClient.get('/message-logs', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching message logs:', error);
+    throw error;
+  }
+};
+
+// Message Templates API functions
+const getMessageTemplates = async (params?: { scope?: 'broadcast' | 'transaction' | 'customer'; category?: 'maintenance' | 'payment' | 'promotion' | 'general'; isActive?: boolean; limit?: number }): Promise<ApiResponse<MessageTemplateModel[]>> => {
+  try {
+    const response = await apiClient.get('/message-templates', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching message templates:', error);
+    throw error;
+  }
+};
+
+const createMessageTemplate = async (payload: Omit<MessageTemplateModel, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<MessageTemplateModel>> => {
+  try {
+    const response = await apiClient.post('/message-templates', payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating message template:', error);
+    throw error;
+  }
+};
+
+const updateMessageTemplate = async (id: number, payload: Partial<Omit<MessageTemplateModel, 'id' | 'createdAt' | 'updatedAt'>>): Promise<ApiResponse<MessageTemplateModel>> => {
+  try {
+    const response = await apiClient.put(`/message-templates/${id}`, payload);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating message template:', error);
+    throw error;
+  }
+};
+
+const deleteMessageTemplate = async (id: number): Promise<ApiResponse<{ success: boolean }>> => {
+  try {
+    const response = await apiClient.delete(`/message-templates/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting message template:', error);
+    throw error;
+  }
+};
+
 // Area API functions
 const getAreas = async (): Promise<ApiResponse<Area[]>> => {
   try {
@@ -162,6 +252,16 @@ const getODPs = async (): Promise<ApiResponse<ODP[]>> => {
     return response.data;
   } catch (error) {
     console.error('Error fetching ODPs:', error);
+    throw error;
+  }
+};
+
+const getODPCustomers = async (odpId: string): Promise<ApiResponse<Customer[]>> => {
+  try {
+    const response = await apiClient.get(`/odps/${odpId}/customers`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching ODP customers:', error);
     throw error;
   }
 };
@@ -554,9 +654,12 @@ const deleteSales = async (id: string): Promise<ApiResponse<void>> => {
 // Response interceptor
 apiClient.interceptors.response.use(
   (response) => {
-    if (response.config.url?.includes('/settings/waha')) {
+    const url = response.config.url || '';
+    if (url.includes('/settings/waha') || url.includes('/waha-config')) {
       const wahaData = response.data?.data || response.data;
-      localStorage.setItem('wahaConfig', JSON.stringify(wahaData));
+      try {
+        localStorage.setItem('wahaConfig', JSON.stringify(wahaData));
+      } catch {}
     }
     return response;
   },
@@ -704,6 +807,14 @@ export const api = {
   updateRouter,
   deleteRouter,
   testRouterConnection,
+  getRouterInterfaces,
+  getRouterInterfaceTraffic,
+  createMessageLog,
+  getMessageLogs,
+  getMessageTemplates,
+  createMessageTemplate,
+  updateMessageTemplate,
+  deleteMessageTemplate,
   
   // Area
   getAreas,
@@ -716,6 +827,7 @@ export const api = {
   createODP,
   updateODP,
   deleteODP,
+  getODPCustomers,
   
   // Package
   getPackages,
