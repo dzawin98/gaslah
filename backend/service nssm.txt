@@ -1,0 +1,9 @@
+| Perintah                             | Fungsi                                              |
+| ------------------------------------ | --------------------------------------------------- |
+| `nssm install <service-name>`        | Membuat service baru                                |
+| `nssm remove <service-name> confirm` | Menghapus service                                   |
+| `nssm start <service-name>`          | Menjalankan service                                 |
+| `nssm stop <service-name>`           | Menghentikan service                                |
+| `nssm restart <service-name>`        | Restart service                                     |
+| `nssm status <service-name>`         | Melihat status service                              |
+| `nssm list`                          | Menampilkan semua service yang dibuat dengan `nssm` |

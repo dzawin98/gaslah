@@ -1,0 +1,124 @@
+Peran: Anda adalah senior engineer Node.js + Vite. Tugas Anda menambahkan modul Hotspot MikroTik ke aplikasi manajemen PPPOE yang sudah berjalan. Modul harus production‑ready, aman, teruji, dan mengikuti pola arsitektur aplikasi yang ada.
+
+Tujuan:
+
+Mengelola Hotspot MikroTik: generate voucher, manajemen user & profile, cetak voucher (QR), pelaporan penjualan, monitor trafik, dan utilitas sistem (reboot/shutdown), dengan dukungan multi‑router session.
+Reuse fondasi aplikasi (auth, UI, state, komponen) seminimal mungkin perubahan arsitektur.
+Menjaga compatibility dengan stack Node.js (Express/Nest) dan frontend Vite (React/Vue) yang sudah ada.
+Stack dan Integrasi:
+
+Backend: Node.js (Express atau NestJS sesuai arsitektur saat ini).
+RouterOS API: jika memungkinkan gunakan library mikronode/mikronode-ng2 untuk akses API RouterOS. Jika tidak tersedia/diizinkan, implementasikan client ringan untuk wire‑protocol RouterOS (port 8728/8729, login post‑6.43 + fallback pre‑6.43, write/read frame).
+Frontend: Vite (+ React/Vue), i18n, theming mengikuti sistem yang ada. Tambah halaman/komponen baru untuk Hotspot.
+QR: gunakan library ringan qrcode (Node/Frontend) atau qrious di frontend.
+Konfigurasi: .env dan settings per router session. Simpan kredensial terenkripsi.
+Variabel Lingkungan (.env):
+
+HOTSPOT_DEFAULT_HOST, HOTSPOT_DEFAULT_USER, HOTSPOT_DEFAULT_PASS, HOTSPOT_DEFAULT_PORT=8728, HOTSPOT_USE_SSL=false
+HOTSPOT_DNS_NAME (untuk QR login), HOTSPOT_CURRENCY=IDR, HOTSPOT_AUTO_RELOAD_SEC=10, HOTSPOT_TRAFFIC_IFACE_INDEX=1, HOTSPOT_IDLE_TIMEOUT_MIN=10
+Model Data (Backend):
+
+RouterSession: id, name, host, username, password_encrypted, port, ssl, dnsName, currency, autoReloadSec, trafficIfaceIndex, idleTimeoutMin, liveReportEnabled.
+HotspotProfile: name, sharedUsers, rateLimit, validity, expiredMode, price, sellingPrice, gracePeriod, lockUser, addressPool, parentQueue, onLoginScript.
+Voucher: username, password, server, profile, timeLimit, dataLimitBytes, comment, generatedAt.
+(Opsional cache) ReportEntry: date, time, user, price, address, mac, validity, profile, comment, source, owner.
+Fitur yang Harus Diimplementasikan:
+
+Dashboard Hotspot:
+Identitas router, clock/timezone, resource (CPU/RAM/Uptime), RouterBOARD model.
+Ringkasan jumlah user, active sessions, grafik trafik Rx/Tx untuk interface yang dipilih.
+Users:
+List/filter/cari, detail (limit, uptime, bytes, comment).
+Generate voucher batch: mode up (username acak + password angka), mode vc (kode voucher sebagai username, password sama/variasi).
+Set limit-uptime, limit-bytes-total, comment batch token untuk pencetakan.
+Enable/disable, reset limit, remove user satuan/massal (berdasarkan comment/prefix).
+Export ke RouterOS script dan CSV.
+Profiles:
+CRUD: shared-users, rate-limit, address-pool, parent queue.
+expired mode: None, Remove, Notice, Remove & Record, Notice & Record.
+validity (format RouterOS, mis. 5m, 1d, 1w2d) dan grace period.
+lock user (binding MAC saat login, opsional).
+Harga (price) dan harga jual (sellingPrice) disisipkan ke on-login.
+Buat/kelola system scheduler untuk sweeping expired sesuai konfigurasi profile.
+Voucher & Cetak:
+Template: thermal/small/standard; variabel dinamis untuk hotspot name, profile, username/password, validity, price/sellingPrice, time/data limit, comment, no urut.
+QR: http://<dnsName>/login?username=<u>&password=<p>.
+Trafik:
+Monitor trafik interface via interface/monitor-traffic once. Grafik sederhana Rx/Tx dengan pengaturan skala maksimum dari settings.
+Reports:
+Selling report (harian/bulanan), sumber data dari system script yang dibuat oleh on-login (mode “Record”).
+Filter hari/bulan/prefix/profile; totalisasi; ekspor CSV; cetak; hapus data per hari/bulan/semua yang bertag laporan.
+System:
+system scheduler list/enable/disable/remove.
+Ping test, reboot, shutdown dengan konfirmasi.
+Settings:
+Multi‑session router management: tambah/edit/hapus, connect test, ping.
+Bahasa (i18n), tema, DNS name, currency, auto reload, traffic iface index, idle timeout, editor template voucher.
+Kontrak RouterOS (Perintah/API):
+
+Read:
+/system/clock/print, /system/resource/print, /system/routerboard/print
+/ip/hotspot/user/print (filter ?profile, ?comment, count-only)
+/ip/hotspot/active/print (filter ?server)
+/ip/hotspot/user/profile/print
+/interface/monitor-traffic (interface, once)
+/system/scheduler/print
+/system/script/print (filter ?owner=<MMMYYYY>, ?source=<YYYY/MM/DD>, ?comment=mikhmon)
+Write:
+/ip/hotspot/user/add|set|remove
+/ip/hotspot/user/profile/add|set|remove (isi on-login dengan metadata: expiredMode, price, validity, sellingPrice, lockUser)
+/system/scheduler/add|set|remove (sweeper expired)
+/system/script/add|remove (record untuk laporan, dibuat dari on-login)
+on-login Profile (Desain):
+
+Pada login pertama user, on-login:
+Tulis entri laporan ke system script (owner=bulan+tahun, source=tanggal) memuat: tanggal, waktu, username, price/sellingPrice, address, MAC, validity, profile, comment/tag.
+Simpan metadata dalam string terstruktur (coma‑separated) agar UI dapat membacanya dari profile (contoh pola: ,<expiredMode>,<price>,<validity>,<sellingPrice>,,<lockUser>,).
+Buat system scheduler per profile:
+Event berkala mengecek user expired (berdasarkan timestamp di comment atau perbandingan date/time) dan melakukan aksi sesuai expiredMode (remove atau notice/set limit‑uptime 1s), optional remove dari active session.
+Endpoint Backend (Contoh, sesuaikan gaya modul yang ada):
+
+GET /hotspot/sessions | POST /hotspot/sessions | PUT /hotspot/sessions/:id | DELETE /hotspot/sessions/:id
+POST /hotspot/sessions/:id/connect | POST /hotspot/sessions/:id/ping
+GET /hotspot/users (query: session, profile, comment, search, page) | POST /hotspot/users | DELETE /hotspot/users/:id
+POST /hotspot/users/generate (payload: server, profile, qty, mode=up|vc, length, prefix, timeLimit, dataLimitMB, additionalComment)
+GET /hotspot/active (query: session, server) | DELETE /hotspot/active/:id
+GET /hotspot/profiles | POST /hotspot/profiles | PUT /hotspot/profiles/:id | DELETE /hotspot/profiles/:id
+GET /hotspot/schedulers | POST /hotspot/schedulers | PUT /hotspot/schedulers/:id | DELETE /hotspot/schedulers/:id
+GET /hotspot/reports/selling (query: session, day, month, prefix, profile) | DELETE /hotspot/reports/selling (by day|month|all)
+GET /hotspot/export/users (query: session, format=script|csv, profile, comment)
+Halaman Frontend (Vite):
+
+HotspotDashboardPage
+HotspotUsersPage (+ modal generate voucher, ekspor)
+HotspotProfilesPage (+ form builder on-login, expired/lock/harga)
+VoucherPrintPage (pilih template, preview, QR)
+TrafficPage
+ReportsPage (selling report harian/bulanan, filter/prefix, CSV/print)
+SchedulersPage
+HotspotSettingsPage (multi‑session, DNS/currency/tema/interface/idle, editor template)
+Komponen reusable: RouterSessionSelector, QrCode, ConfirmDialog, DataTable dengan filter.
+Keamanan:
+
+Simpan password router terenkripsi (jangan log plaintext).
+Firewall di MikroTik hanya mengizinkan IP aplikasi ke port 8728/8729.
+Rate limit aksi generate/print/report; sanitasi input (nama profil tanpa spasi; prefix alfanumerik; panjang karakter).
+Role‑based access (admin/operator) mengikuti sistem PPPOE yang ada.
+Testing:
+
+Unit test client RouterOS (mock socket jika tidak pakai library).
+Integration test: tambah profile → generate voucher → cetak → simulasi login → cek record laporan → expired sweep oleh scheduler.
+Performansi untuk list user besar; security test (XSS/CSRF).
+Deliverables:
+
+Modul backend & frontend lengkap dengan dokumentasi endpoint.
+Template voucher (thermal/small/standard) dan komponen QR.
+Skrip migrasi on-login & scheduler untuk profile yang dibuat dari UI.
+Guide konfigurasi sesi router, DNS name, currency, trafik interface, tema/bahasa.
+Kriteria Penerimaan:
+
+Koneksi ke MikroTik stabil (retry/timeout), dukung API dan API‑SSL.
+Generate, cetak, dan login voucher berfungsi (QR ke http://<dnsName>/login?...).
+Selling report harian/bulanan dengan filter/prefix; CSV dan print berjalan.
+Expired mode bekerja sesuai profile; scheduler menyapu sesuai aturan.
+Multi‑session router, i18n, theming, dan integrasi dengan modul PPPOE konsisten.

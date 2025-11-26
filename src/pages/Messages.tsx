@@ -1,0 +1,2096 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Send, Users, MessageSquare, Clock, Settings, FileText, Trash2, Edit, RefreshCcw, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { useCustomers } from '@/hooks/useCustomers';
+import { useAreas } from '@/hooks/useAreas';
+import { usePackages } from '@/hooks/usePackages';
+import { useODP } from '@/hooks/useODP';
+import { Customer } from '@/types/isp';
+import { useToast } from '@/hooks/use-toast';
+import { useWahaConfig } from '../hooks/useWahaConfig';
+import { useAppSetting } from '@/hooks/useAppSetting';
+import { api } from '@/utils/api';
+
+
+interface MessageHistory {
+  id: string;
+  recipients: number;
+  message: string;
+  criteria: string;
+  sentAt: Date;
+  status: 'sent' | 'failed' | 'pending';
+  failedRecipients?: { id: string | number; name: string; phone: string }[];
+  recipientDetails?: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[];
+}
+
+interface MessageTemplate {
+  id: string;
+  name: string;
+  content: string;
+  createdAt: Date;
+  category: 'maintenance' | 'payment' | 'promotion' | 'general';
+}
+
+interface BroadcastCriteria {
+  paymentStatus: string;
+  dateExpiryCriteria: string;
+  dateSuspendCriteria: string;
+  area: string;
+  package: string;
+  odp: string;
+  sendToCustomer: string;
+  message: string;
+}
+
+const Messages = () => {
+  const { customers } = useCustomers();
+  const { areas } = useAreas();
+  const { packages } = usePackages();
+  const { odp } = useODP();
+  const { toast } = useToast();
+  
+  const [showBroadcastForm, setShowBroadcastForm] = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [showAddTemplateDialog, setShowAddTemplateDialog] = useState(false);
+  const [messageHistory, setMessageHistory] = useState<MessageHistory[]>([]);
+  const { setting: serverMessageHistory = [], isLoading: historyLoading, saveSetting: saveServerMessageHistory } = useAppSetting<MessageHistory[]>('messageHistory', []);
+  const historyInitializedRef = useRef(false);
+  const [messageTemplates, setMessageTemplates] = useState<MessageTemplate[]>([]);
+  const [isSending, setIsSending] = useState(false);
+  // Jeda antar pesan akan diambil dari konfigurasi WAHA (default 5 detik)
+  // Antrian pengiriman per pelanggan
+  type QueueStatus = 'queued' | 'sending' | 'sent' | 'failed';
+  interface QueueItem {
+    id: string;
+    customerId: string | number;
+    name: string;
+    phone: string;
+    status: QueueStatus;
+    error?: string;
+  }
+  const [sendingQueue, setSendingQueue] = useState<QueueItem[]>([]);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveTimestamp, setSaveTimestamp] = useState<string | null>(null);
+  // Dialog: daftar penerima per riwayat
+  const [recipientsDialogOpen, setRecipientsDialogOpen] = useState(false);
+  const [recipientsDialogData, setRecipientsDialogData] = useState<{ id: string; recipients: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[] } | null>(null);
+  const openRecipientsDialog = (history: MessageHistory) => {
+    setRecipientsDialogData({ id: history.id, recipients: history.recipientDetails || [] });
+    setRecipientsDialogOpen(true);
+  };
+  const closeRecipientsDialog = () => {
+    setRecipientsDialogOpen(false);
+    setRecipientsDialogData(null);
+  };
+  // Message detail dialog
+  const [messageDetailOpen, setMessageDetailOpen] = useState(false);
+  const [messageDetailData, setMessageDetailData] = useState<{ id: string; message: string; criteria: string } | null>(null);
+  const openMessageDetail = (history: MessageHistory) => {
+    setMessageDetailData({ id: history.id, message: history.message, criteria: history.criteria });
+    setMessageDetailOpen(true);
+  };
+  const closeMessageDetail = () => {
+    setMessageDetailOpen(false);
+    setMessageDetailData(null);
+  };
+  
+  const [newTemplate, setNewTemplate] = useState({
+    name: '',
+    content: '',
+    category: 'general' as MessageTemplate['category']
+  });
+  
+  const { config, isLoading: wahaLoading, error, updateConfig } = useWahaConfig();
+  
+  const [formConfig, setFormConfig] = useState({
+    baseUrl: '',
+    session: '',
+    apiKey: '',
+    sendDelayMs: 5000
+  });
+
+  // Riwayat Pesan (Database) - filter & data
+  const [logTypeFilter, setLogTypeFilter] = useState('all');
+  const [logStatusFilter, setLogStatusFilter] = useState('all');
+  const [logPhoneFilter, setLogPhoneFilter] = useState('');
+  const [messageLogs, setMessageLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const fetchMessageLogs = async () => {
+    try {
+      setLogsLoading(true);
+      const resp = await api.getMessageLogs({
+        type: logTypeFilter !== 'all' ? logTypeFilter : undefined,
+        status: logStatusFilter !== 'all' ? logStatusFilter : undefined,
+        phone: logPhoneFilter || undefined,
+        limit: 200
+      });
+      setMessageLogs(resp.data || []);
+    } catch (e) {
+      console.error('Gagal memuat riwayat pesan:', e);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+  useEffect(() => { fetchMessageLogs(); }, [logTypeFilter, logStatusFilter, logPhoneFilter]);
+  
+  // Update form when API data loads
+  useEffect(() => {
+    if (config) {
+      console.log('Setting form config from API:', config);
+      setFormConfig(config);
+    }
+  }, [config]);
+
+  // Load message history dari server
+  useEffect(() => {
+    try {
+      if (serverMessageHistory && Array.isArray(serverMessageHistory)) {
+        const restored: MessageHistory[] = (serverMessageHistory || []).map((h: any) => ({
+          ...h,
+          sentAt: h.sentAt ? new Date(h.sentAt) : new Date()
+        }));
+        setMessageHistory(restored.slice(0, 200));
+      }
+    } catch (e) {
+      console.error('Error loading message history from server:', e);
+    }
+  }, [serverMessageHistory]);
+
+  // Persist message history ke server saat berubah (skip pertama kali)
+  useEffect(() => {
+    try {
+      if (!historyInitializedRef.current) {
+        historyInitializedRef.current = true;
+        return;
+      }
+      const serializable = messageHistory.map(h => ({
+        ...h,
+        sentAt: h.sentAt instanceof Date ? h.sentAt.toISOString() : h.sentAt
+      }));
+      saveServerMessageHistory.mutate(serializable as any);
+    } catch (e) {
+      console.error('Error saving message history to server:', e);
+    }
+  }, [messageHistory]);
+
+  // Load templates from DB
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await api.getMessageTemplates({ limit: 200 });
+        const templates = (resp.data || []).map((t: any) => ({
+          id: String(t.id),
+          name: t.name,
+          content: t.content,
+          category: t.category,
+          createdAt: new Date(t.createdAt)
+        }));
+        setMessageTemplates(templates);
+      } catch (error) {
+        console.error('Error loading message templates from DB:', error);
+      }
+    })();
+  }, []);
+  
+  const [broadcastData, setBroadcastData] = useState<BroadcastCriteria>({
+    paymentStatus: '',
+    dateExpiryCriteria: '',
+    dateSuspendCriteria: '',
+    area: '',
+    package: '',
+    odp: '',
+    sendToCustomer: '',
+    message: `Pemberitahuan Pemeliharaan Jaringan\n\nKepada Pelanggan Yth,\n\nKami ingin memberitahukan bahwa saat ini kami sedang melakukan pemeliharaan jaringan di area [AREA], dikarenakan adanya gangguan pada kabel Fiber yang putus.\n\nNama: [NAMA]\nNo. Pelanggan: [NOPEL]\nPaket: [PAKET]\n\nMohon pengertian Anda atas ketidaknyamanan yang terjadi.`
+  });
+
+  // Dialog pemilih pelanggan
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+
+  // Template management functions
+  const saveTemplate = () => {
+    if (!newTemplate.name.trim() || !newTemplate.content.trim()) {
+      toast({
+        title: "Error",
+        description: "Nama dan isi template harus diisi",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    (async () => {
+      try {
+        if (editingTemplate) {
+          const updated = await api.updateMessageTemplate(Number(editingTemplate.id), {
+            name: newTemplate.name.trim(),
+            content: newTemplate.content.trim(),
+            category: newTemplate.category
+          });
+          setMessageTemplates(prev => prev.map(t => t.id === editingTemplate.id ? {
+            id: String(updated.data!.id),
+            name: updated.data!.name,
+            content: updated.data!.content,
+            category: updated.data!.category,
+            createdAt: new Date(updated.data!.createdAt)
+          } : t));
+          toast({ title: 'Berhasil', description: 'Template berhasil diperbarui' });
+        } else {
+          const created = await api.createMessageTemplate({
+            name: newTemplate.name.trim(),
+            content: newTemplate.content.trim(),
+            category: newTemplate.category,
+            scope: 'broadcast',
+            isActive: true
+          } as any);
+          setMessageTemplates(prev => [{
+            id: String(created.data!.id),
+            name: created.data!.name,
+            content: created.data!.content,
+            category: created.data!.category,
+            createdAt: new Date(created.data!.createdAt)
+          }, ...prev]);
+          toast({ title: 'Berhasil', description: 'Template berhasil ditambahkan' });
+        }
+      } catch (e) {
+        toast({ title: 'Error', description: 'Gagal menyimpan template', variant: 'destructive' });
+      }
+    })();
+    
+    // Reset form
+    setNewTemplate({ name: '', content: '', category: 'general' });
+    setEditingTemplate(null);
+    setShowAddTemplateDialog(false);
+  };
+
+  const deleteTemplate = (templateId: string) => {
+    (async () => {
+      try {
+        await api.deleteMessageTemplate(Number(templateId));
+        const updatedTemplates = messageTemplates.filter(t => t.id !== templateId);
+        setMessageTemplates(updatedTemplates);
+        toast({ title: 'Berhasil', description: 'Template berhasil dihapus' });
+      } catch (e) {
+        toast({ title: 'Error', description: 'Gagal menghapus template', variant: 'destructive' });
+      }
+    })();
+  };
+
+  const editTemplate = (template: MessageTemplate) => {
+    setEditingTemplate(template);
+    setNewTemplate({
+      name: template.name,
+      content: template.content,
+      category: template.category
+    });
+    setShowAddTemplateDialog(true);
+  };
+
+  const useTemplate = (template: MessageTemplate) => {
+    setBroadcastData(prev => ({
+      ...prev,
+      message: template.content
+    }));
+    setShowTemplateDialog(false);
+    toast({
+      title: "Berhasil",
+      description: `Template "${template.name}" berhasil dimuat`
+    });
+  };
+
+  const getCategoryBadgeColor = (category: MessageTemplate['category']) => {
+    switch (category) {
+      case 'maintenance': return 'bg-orange-100 text-orange-800';
+      case 'payment': return 'bg-blue-100 text-blue-800';
+      case 'promotion': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getCategoryLabel = (category: MessageTemplate['category']) => {
+    switch (category) {
+      case 'maintenance': return 'Pemeliharaan';
+      case 'payment': return 'Pembayaran';
+      case 'promotion': return 'Promosi';
+      default: return 'Umum';
+    }
+  };
+
+  // Filter customers based on criteria
+  const getFilteredCustomers = (): Customer[] => {
+    if (!customers) return [];
+    
+    console.log('Starting filter with criteria:', broadcastData);
+    console.log('Total customers:', customers.length);
+    
+    return customers.filter((customer) => {
+      // PERBAIKAN: Jika ada filter pelanggan tertentu, prioritaskan dan abaikan filter lainnya
+      if (broadcastData.sendToCustomer && broadcastData.sendToCustomer.trim() !== '') {
+        const searchTerm = broadcastData.sendToCustomer.toLowerCase().trim();
+        
+        // Jika input adalah nomor (hanya angka), prioritaskan pencarian nomor
+        const isNumericSearch = /^\d+$/.test(searchTerm);
+        
+        let matches = false;
+        
+        if (isNumericSearch) {
+          // Pencarian berdasarkan nomor (nomor pelanggan atau HP)
+          matches = customer.customerNumber.toLowerCase().includes(searchTerm) ||
+                   customer.phone.replace(/[^0-9]/g, '').includes(searchTerm);
+        } else {
+          // Pencarian berdasarkan nama atau kombinasi
+          matches = customer.name.toLowerCase().includes(searchTerm) ||
+                   customer.customerNumber.toLowerCase().includes(searchTerm) ||
+                   customer.phone.replace(/[^0-9]/g, '').includes(searchTerm.replace(/[^0-9]/g, '')) ||
+                   (customer.address && customer.address.toLowerCase().includes(searchTerm));
+        }
+        
+        if (matches) {
+          console.log('Customer matched search term:', customer.name);
+          return true;
+        } else {
+          console.log('Filtered out by search term:', customer.name, 'Search:', searchTerm);
+          return false;
+        }
+      }
+
+      // Filter ODP, Wilayah (Area), dan Paket
+      // Area
+      if (broadcastData.area && broadcastData.area !== 'all') {
+        if (customer.area !== broadcastData.area) {
+          console.log('Filtered out by area:', customer.name, 'area:', customer.area, 'filter:', broadcastData.area);
+          return false;
+        }
+      }
+      // Paket
+      if (broadcastData.package && broadcastData.package !== 'all') {
+        if (customer.package !== broadcastData.package) {
+          console.log('Filtered out by package:', customer.name, 'package:', customer.package, 'filter:', broadcastData.package);
+          return false;
+        }
+      }
+      // ODP (gunakan nama ODP dari relasi atau slot ODP jika tersedia)
+      if (broadcastData.odp && broadcastData.odp !== 'all') {
+        const selectedODP = broadcastData.odp.toLowerCase().trim();
+        const customerODPName = (customer.odpData?.name || '').toLowerCase().trim();
+        const customerODPSlotRaw = (customer.odpSlot || '').toLowerCase().trim();
+        const customerODPSlotBase = customerODPSlotRaw.split('/')[0];
+        const matchesODP = customerODPName === selectedODP || customerODPSlotRaw === selectedODP || customerODPSlotBase === selectedODP;
+        if (!matchesODP) {
+          console.log('Filtered out by ODP:', customer.name, 'odpData.name:', customerODPName, 'odpSlotRaw:', customerODPSlotRaw, 'odpSlotBase:', customerODPSlotBase, 'filter:', selectedODP);
+          return false;
+        }
+      }
+      
+      // Payment status filter — selaraskan dengan due day (paymentDueDate) dan aturan prepaid/postpaid
+      if (broadcastData.paymentStatus && broadcastData.paymentStatus !== 'all') {
+        const now = new Date();
+        const currentDay = now.getDate();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        // Normalize today and important dates
+        const today = new Date(); today.setHours(0,0,0,0);
+        const expireDate = customer.expireDate ? new Date(customer.expireDate) : null;
+        if (expireDate) expireDate.setHours(0,0,0,0);
+        const lastBillingDate = customer.lastBillingDate ? new Date(customer.lastBillingDate) : null;
+        if (lastBillingDate) lastBillingDate.setHours(0,0,0,0);
+
+        // due day from paymentDueDate if available, fallback to 5
+        const dueDateObj = customer.paymentDueDate ? new Date(customer.paymentDueDate) : null;
+        const dueDay = dueDateObj ? dueDateObj.getDate() : 5;
+        const withinBillingWindow = currentDay >= 1 && currentDay <= dueDay;
+
+        const hasPaidThisMonth = !!(lastBillingDate && lastBillingDate.getMonth() === currentMonth && lastBillingDate.getFullYear() === currentYear);
+        const isPostpaid = customer.billingType === 'postpaid';
+        const isPrepaid = customer.billingType === 'prepaid';
+        const isSuspendedLike = (customer.status === 'suspended') || (customer.billingStatus === 'suspend') || (customer.mikrotikStatus === 'disabled') || !!customer.isIsolated;
+
+        // Helper flags for prepaid
+        const expired = expireDate ? expireDate.getTime() < today.getTime() : false;
+        const expiredThisMonth = !!(expireDate && expireDate.getMonth() === currentMonth && expireDate.getFullYear() === currentYear && expired);
+
+        if (broadcastData.paymentStatus === 'paid') {
+          // Postpaid: paid if has payment in current month
+          // Prepaid: paid/active if not expired
+          const isPaid = isPostpaid ? hasPaidThisMonth : !expired;
+          if (!isPaid) {
+            console.log('Filtered out by payment status (paid rule):', customer.name, { hasPaidThisMonth, expired });
+            return false;
+          }
+        }
+
+        if (broadcastData.paymentStatus === 'unpaid') {
+          if (isPostpaid) {
+            const isUnpaidThisWindow = withinBillingWindow && !hasPaidThisMonth && !isSuspendedLike;
+            if (!isUnpaidThisWindow) {
+              console.log('Filtered out by payment status (postpaid unpaid with dueDay):', customer.name, { currentDay, dueDay, withinBillingWindow, hasPaidThisMonth, isSuspendedLike });
+              return false;
+            }
+          } else if (isPrepaid) {
+            // Prepaid: only show as unpaid if expired this month AND within billing window
+            const isUnpaidPrepaidWindow = expiredThisMonth && withinBillingWindow && !isSuspendedLike;
+            if (!isUnpaidPrepaidWindow) {
+              console.log('Filtered out by payment status (prepaid expired this month + window):', customer.name, { expiredThisMonth, withinBillingWindow, isSuspendedLike });
+              return false;
+            }
+          } else {
+            // Other types: fallback to not overdue as paid, overdue within window as unpaid
+            const isOverdue = expireDate ? expireDate.getTime() < today.getTime() : false;
+            const ok = withinBillingWindow && isOverdue && !isSuspendedLike;
+            if (!ok) {
+              console.log('Filtered out by payment status (fallback type rule):', customer.name, { isOverdue, withinBillingWindow, isSuspendedLike });
+              return false;
+            }
+          }
+        }
+      }
+      
+      // Date expiry criteria - perbaiki logika tanggal
+      if (broadcastData.dateExpiryCriteria && broadcastData.dateExpiryCriteria !== 'all') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (!customer.expireDate) {
+          console.log('Filtered out by expiry date (no date):', customer.name);
+          return false;
+        }
+        
+        const expireDate = new Date(customer.expireDate);
+        expireDate.setHours(0, 0, 0, 0);
+        
+        if (broadcastData.dateExpiryCriteria === 'today') {
+          if (expireDate.getTime() !== today.getTime()) {
+            console.log('Filtered out by expiry date (not today):', customer.name);
+            return false;
+          }
+        } else if (broadcastData.dateExpiryCriteria === 'tomorrow') {
+          const tomorrow = new Date(today);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          if (expireDate.getTime() !== tomorrow.getTime()) {
+            console.log('Filtered out by expiry date (not tomorrow):', customer.name);
+            return false;
+          }
+        } else {
+          // Handle specific day criteria (1_day, 2_days, etc.)
+          const daysMap: { [key: string]: number } = {
+            '1_day': 1, '2_days': 2, '3_days': 3, '4_days': 4,
+            '5_days': 5, '6_days': 6, '7_days': 7
+          };
+          
+          if (daysMap[broadcastData.dateExpiryCriteria]) {
+            const targetDate = new Date(today);
+            targetDate.setDate(targetDate.getDate() + daysMap[broadcastData.dateExpiryCriteria]);
+            if (expireDate.getTime() !== targetDate.getTime()) {
+              console.log('Filtered out by expiry date (not target day):', customer.name);
+              return false;
+            }
+          }
+        }
+      }
+      
+      // PERBAIKAN UTAMA: Logika ISOLIR/SUSPEND — normalisasi nilai dan tambahkan derivasi kebijakan
+      if (broadcastData.dateSuspendCriteria && broadcastData.dateSuspendCriteria !== 'all') {
+        // Normalisasi nilai string (case-insensitive dan variasi istilah umum)
+        const statusNorm = (customer.status || '').toString().trim().toLowerCase();
+        const billingStatusNorm = (customer.billingStatus || '').toString().trim().toLowerCase();
+        const mikrotikStatusNorm = (customer.mikrotikStatus || '').toString().trim().toLowerCase();
+        const isolated = !!customer.isIsolated;
+
+        // Hitung jendela due day yang dipersonalisasi
+        const now = new Date();
+        const currentDay = now.getDate();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const today = new Date(); today.setHours(0,0,0,0);
+
+        const expireDate = customer.expireDate ? new Date(customer.expireDate) : null;
+        if (expireDate) expireDate.setHours(0,0,0,0);
+
+        const lastBillingDate = customer.lastBillingDate ? new Date(customer.lastBillingDate) : null;
+        if (lastBillingDate) lastBillingDate.setHours(0,0,0,0);
+
+        const dueDateObj = customer.paymentDueDate ? new Date(customer.paymentDueDate) : null;
+        const dueDay = dueDateObj ? dueDateObj.getDate() : 5;
+        const withinBillingWindow = currentDay >= 1 && currentDay <= dueDay;
+
+        const hasPaidThisMonth = !!(lastBillingDate && lastBillingDate.getMonth() === currentMonth && lastBillingDate.getFullYear() === currentYear);
+        const isPostpaid = customer.billingType === 'postpaid';
+        const isPrepaid = customer.billingType === 'prepaid';
+
+        // Prepaid flags
+        const expired = expireDate ? expireDate.getTime() < today.getTime() : false;
+        const expiredThisMonth = !!(expireDate && expireDate.getMonth() === currentMonth && expireDate.getFullYear() === currentYear && expired);
+        const expiredPrevMonthOrOlder = !!(expireDate && expired && (expireDate.getMonth() !== currentMonth || expireDate.getFullYear() !== currentYear));
+
+        // Deteksi Suspended berdasarkan kebijakan (tanpa bergantung ke backend flags)
+        const isSuspendedByPolicy = (
+          (isPostpaid && !withinBillingWindow && !hasPaidThisMonth) ||
+          (isPrepaid && (expiredPrevMonthOrOlder || (expiredThisMonth && !withinBillingWindow)))
+        );
+
+        // Deteksi Suspended berdasarkan flag backend/operasional
+        const suspendedByStatus = statusNorm === 'suspended' || statusNorm === 'suspend';
+        const suspendedByBilling = billingStatusNorm === 'suspend';
+        const mikrotikDisabled = mikrotikStatusNorm === 'disabled' || mikrotikStatusNorm === 'disable' || mikrotikStatusNorm === 'nonaktif' || mikrotikStatusNorm === 'off';
+
+        const isSuspendedRaw = suspendedByStatus || suspendedByBilling || mikrotikDisabled || isolated;
+
+        // Terapkan kriteria
+        if (broadcastData.dateSuspendCriteria === 'suspended') {
+          // Ditampilkan jika suspended oleh flag backend ATAU menurut kebijakan due-day
+          const isSuspended = isSuspendedRaw || isSuspendedByPolicy;
+          if (!isSuspended) {
+            console.log('Filtered out by suspend criteria (not suspended):', customer.name, {
+              status: customer.status,
+              billingStatus: customer.billingStatus,
+              mikrotikStatus: customer.mikrotikStatus,
+              isIsolated: customer.isIsolated,
+              isSuspendedByPolicy
+            });
+            return false;
+          }
+        } else if (broadcastData.dateSuspendCriteria === 'active') {
+          // Active: bukan suspended (flag/kebijakan) dan tidak diisolir
+          const notSuspended = !(isSuspendedRaw || isSuspendedByPolicy);
+          if (!notSuspended || isolated) {
+            console.log('Filtered out by suspend criteria (not active):', customer.name, {
+              status: customer.status,
+              billingStatus: customer.billingStatus,
+              mikrotikStatus: customer.mikrotikStatus,
+              isIsolated: customer.isIsolated,
+              isSuspendedByPolicy
+            });
+            return false;
+          }
+        }
+      }
+      
+      console.log('Customer passed all filters:', customer.name);
+      return true;
+    });
+  };
+
+  // Replace message placeholders
+  const replaceMessagePlaceholders = (message: string, customer: Customer): string => {
+    const price = Number(customer.packagePrice || 0);
+    const activeDateStr = customer.activeDate
+      ? (() => {
+          const d = new Date(customer.activeDate);
+          return isNaN(d.getTime()) ? String(customer.activeDate) : d.toLocaleDateString('id-ID');
+        })()
+      : '';
+    const expireDateStr = customer.expireDate
+      ? (() => {
+          const d = new Date(customer.expireDate);
+          return isNaN(d.getTime()) ? String(customer.expireDate) : d.toLocaleDateString('id-ID');
+        })()
+      : '';
+
+    return message
+      // Bracket-style placeholders
+      .replace(/\[NOPEL\]/gi, customer.customerNumber || '')
+      .replace(/\[NAMA\]/gi, customer.name || '')
+      .replace(/\[PAKET\]/gi, customer.package || '')
+      .replace(/\[AREA\]/gi, customer.area || '')
+      .replace(/\[PHONE\]/gi, customer.phone || '')
+      .replace(/\[ADDRESS\]/gi, customer.address || '')
+      .replace(/\[PRICE\]/gi, price.toLocaleString('id-ID'))
+      .replace(/\[ACTIVE_DATE\]/gi, activeDateStr)
+      .replace(/\[EXPIRE_DATE\]/gi, expireDateStr)
+      .replace(/\[HARGA\]/gi, price.toLocaleString('id-ID'))
+
+      // Curly-brace placeholders (konsisten dengan CustomerForm/Customers)
+      .replace(/\{customerNumber\}/gi, customer.customerNumber || '')
+      .replace(/\{customerName\}/gi, customer.name || '')
+      .replace(/\{packageName\}/gi, customer.package || '')
+      .replace(/\{packagePrice\}/gi, price.toLocaleString('id-ID'))
+      .replace(/\{area\}/gi, customer.area || '')
+      .replace(/\{activeDate\}/gi, activeDateStr)
+      .replace(/\{expireDate\}/gi, expireDateStr);
+  };
+
+  // Send message via WAHA API
+  const sendWhatsAppMessage = async (phone: string, message: string): Promise<boolean> => {
+    try {
+      // Format phone number (remove +, spaces, etc.)
+      const formattedPhone = phone.replace(/[^0-9]/g, '');
+      const chatId = formattedPhone.startsWith('62') ? 
+        `${formattedPhone}@c.us` : 
+        `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
+      
+      // Cek apakah session tersedia terlebih dahulu
+      const sessionCheck = await fetch(`${config.baseUrl}/api/sessions/${config.session}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.apiKey && { 'X-Api-Key': config.apiKey })
+        }
+      });
+      
+      if (!sessionCheck.ok) {
+        throw new Error(`Session ${config.session} tidak tersedia atau tidak aktif`);
+      }
+      
+      const sessionData = await sessionCheck.json();
+      if (sessionData.status !== 'WORKING') {
+        throw new Error(`Session status: ${sessionData.status}. Session harus dalam status WORKING`);
+      }
+      
+      // PERBAIKAN: Coba beberapa endpoint yang berbeda
+      const endpoints = [
+        // Endpoint v1 (paling umum)
+        `${config.baseUrl}/api/sendText`,
+        // Endpoint v2
+        `${config.baseUrl}/api/${config.session}/sendText`,
+        // Endpoint v3 (swagger style)
+        `${config.baseUrl}/api/sessions/${config.session}/chats/${chatId}/messages`,
+        // Endpoint v4 (alternative)
+        `${config.baseUrl}/api/v1/sessions/${config.session}/chats/${chatId}/messages/text`
+      ];
+      
+      const payloads = [
+        // Payload v1
+        {
+          session: config.session,
+          chatId: chatId,
+          text: message
+        },
+        // Payload v2
+        {
+          chatId: chatId,
+          text: message
+        },
+        // Payload v3
+        {
+          text: message
+        },
+        // Payload v4
+        {
+          text: message
+        }
+      ];
+      
+      // Coba setiap endpoint sampai ada yang berhasil
+      for (let i = 0; i < endpoints.length; i++) {
+        try {
+          console.log(`Mencoba endpoint ${i + 1}: ${endpoints[i]}`);
+          
+          const response = await fetch(endpoints[i], {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(config.apiKey && { 'X-Api-Key': config.apiKey })
+            },
+            body: JSON.stringify(payloads[i])
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`Berhasil dengan endpoint ${i + 1}:`, result);
+            return result.id || result.messageId || result.success ? true : false;
+          } else {
+            console.log(`Endpoint ${i + 1} gagal:`, response.status, response.statusText);
+          }
+        } catch (endpointError) {
+          console.log(`Error pada endpoint ${i + 1}:`, endpointError);
+        }
+      }
+      
+      throw new Error('Semua endpoint gagal. Periksa dokumentasi WAHA API Anda.');
+      
+    } catch (error) {
+      console.error('Error sending WhatsApp message:', error);
+      return false;
+    }
+  };
+
+  // Fungsi untuk test koneksi WAHA
+  const testWahaConnection = async () => {
+    if (!formConfig.baseUrl) {
+      toast({
+        title: "Error",
+        description: "Base URL harus diisi",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionStatus('idle');
+    
+    try {
+      const response = await fetch(`${formConfig.baseUrl}/api/sessions`, {
+        headers: {
+          'X-API-KEY': formConfig.apiKey || ''
+        }
+      });
+
+      if (response.ok) {
+        setConnectionStatus('success');
+        toast({
+          title: "Berhasil",
+          description: "Koneksi WAHA berhasil!"
+        });
+      } else {
+        setConnectionStatus('error');
+        toast({
+          title: "Error",
+          description: `Koneksi gagal: ${response.status} ${response.statusText}`,
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('WAHA connection test failed:', error);
+      setConnectionStatus('error');
+      toast({
+        title: "Error",
+        description: "Koneksi WAHA gagal",
+        variant: "destructive"
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const handleInputChange = (field: keyof BroadcastCriteria, value: string) => {
+    setBroadcastData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!broadcastData.message.trim()) {
+      toast({
+        title: "Error",
+        description: "Pesan tidak boleh kosong",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    const targetCustomers = getFilteredCustomers();
+    
+    if (targetCustomers.length === 0) {
+      toast({
+        title: "Error",
+        description: "Tidak ada pelanggan yang sesuai dengan kriteria",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setIsSending(true);
+    
+    try {
+      let successCount = 0;
+      let failedCount = 0;
+      const failedCustomers: string[] = [];
+      const failedRecipientDetails: { id: string | number; name: string; phone: string }[] = [];
+      const queueBaseId = Date.now().toString();
+
+      // Inisialisasi antrian: semua target jadi queued
+      setSendingQueue(targetCustomers.map((c, idx) => ({
+        id: `${queueBaseId}-${c.id}-${idx}`,
+        customerId: c.id,
+        name: c.name,
+        phone: c.phone,
+        status: 'queued'
+      })));
+
+      // Inisialisasi recipientDetails untuk disimpan di riwayat
+      const recipientDetails: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[] =
+        targetCustomers.map(c => ({ id: c.id, name: c.name, phone: c.phone, status: 'queued' }));
+
+      // Tambahkan entry riwayat sebagai pending terlebih dahulu
+      const historyId = `${queueBaseId}`;
+      const pendingHistory: MessageHistory = {
+        id: historyId,
+        recipients: targetCustomers.length,
+        message: broadcastData.message,
+        criteria: Object.entries(broadcastData)
+          .filter(([key, value]) => key !== 'message' && value && value !== 'all' && value.trim() !== '')
+          .map(([key, value]) => `${key}: ${value}`)
+          .join(', ') || 'Semua pelanggan',
+        sentAt: new Date(),
+        status: 'pending',
+        failedRecipients: [],
+        recipientDetails
+      };
+      setMessageHistory(prev => [pendingHistory, ...prev].slice(0, 200));
+      
+      for (let i = 0; i < targetCustomers.length; i++) {
+        const customer = targetCustomers[i];
+        try {
+          // Update status antrian: sending
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === customer.id ? { ...item, status: 'sending' } : item
+          ));
+
+          recipientDetails[i].status = 'sending';
+
+          const personalizedMessage = replaceMessagePlaceholders(broadcastData.message, customer);
+          const formattedPhone = customer.phone.replace(/[^0-9]/g, '');
+          const chatId = formattedPhone.startsWith('62') ? `${formattedPhone}@c.us` : `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
+          const success = await sendWhatsAppMessage(customer.phone, personalizedMessage);
+          try {
+            await api.createMessageLog({
+              type: 'manual',
+              customerId: String(customer.id),
+              phone: customer.phone,
+              chatId,
+              message: personalizedMessage,
+              status: success ? 'sent' : 'failed'
+            });
+          } catch {}
+          
+          if (success) {
+            successCount++;
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === customer.id ? { ...item, status: 'sent' } : item
+            ));
+            recipientDetails[i].status = 'sent';
+          } else {
+            failedCount++;
+            failedCustomers.push(customer.name);
+            failedRecipientDetails.push({ id: customer.id, name: customer.name, phone: customer.phone });
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === customer.id ? { ...item, status: 'failed', error: 'Gagal mengirim' } : item
+            ));
+            recipientDetails[i].status = 'failed';
+          }
+          
+          // Delay antar pengiriman untuk menghindari rate limiting (5 detik)
+          if (i < targetCustomers.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, (config?.sendDelayMs ?? 5000)));
+          }
+          
+        } catch (error) {
+          console.error(`Error sending to ${customer.name}:`, error);
+          failedCount++;
+          failedCustomers.push(customer.name);
+          failedRecipientDetails.push({ id: customer.id, name: customer.name, phone: customer.phone });
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === customer.id ? { ...item, status: 'failed', error: 'Exception saat mengirim' } : item
+          ));
+          recipientDetails[i].status = 'failed';
+        }
+      }
+      
+      // Update riwayat: dari pending jadi sent/failed (atau sent jika sebagian berhasil)
+      setMessageHistory(prev => prev
+        .map(h =>
+          h.id === historyId
+            ? {
+                ...h,
+                sentAt: new Date(),
+                status: (failedCount === 0 ? 'sent' : failedCount === targetCustomers.length ? 'failed' : 'sent') as MessageHistory['status'],
+                failedRecipients: failedRecipientDetails,
+                recipientDetails
+              }
+            : h
+        )
+        .slice(0, 200)
+      );
+      
+      // Reset form
+      setBroadcastData(prev => ({
+        ...prev,
+        area: '',
+        billingType: '',
+        package: '',
+        odp: '',
+        paymentStatus: '',
+        dateExpiryCriteria: '',
+        dateSuspendCriteria: '',
+        sendToCustomer: ''
+      }));
+      
+      setShowBroadcastForm(false);
+      // Reset antrian setelah selesai
+      setSendingQueue([]);
+      
+      if (successCount > 0) {
+        toast({
+          title: "Berhasil",
+          description: `Berhasil mengirim ${successCount} pesan${failedCount > 0 ? `, ${failedCount} gagal` : ''}`
+        });
+      }
+      
+      if (failedCount > 0) {
+        toast({
+          title: "Error",
+          description: `${failedCount} pesan gagal dikirim: ${failedCustomers.slice(0, 3).join(', ')}${failedCustomers.length > 3 ? '...' : ''}`,
+          variant: "destructive"
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error in broadcast:', error);
+      toast({
+        title: "Error",
+        description: "Terjadi kesalahan saat mengirim pesan",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleResendFailed = async (history: MessageHistory) => {
+    if (!history.failedRecipients || history.failedRecipients.length === 0) {
+      toast({ title: 'Info', description: 'Tidak ada penerima gagal untuk dikirim ulang.' });
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      let successCount = 0;
+      let failedCount = 0;
+      const failedAgainDetails: { id: string | number; name: string; phone: string }[] = [];
+      const queueBaseId = Date.now().toString();
+
+      // Inisialisasi antrian dari penerima gagal
+      setSendingQueue(history.failedRecipients.map((c, idx) => ({
+        id: `${queueBaseId}-${c.id}-${idx}`,
+        customerId: c.id,
+        name: c.name,
+        phone: c.phone,
+        status: 'queued'
+      })));
+
+      const recipientDetails: { id: string | number; name: string; phone: string; status: 'queued' | 'sending' | 'sent' | 'failed' }[] =
+        history.failedRecipients.map(c => ({ id: c.id, name: c.name, phone: c.phone, status: 'queued' }));
+
+      // Buat riwayat pending untuk proses kirim ulang
+      const historyId = `${queueBaseId}`;
+      const pendingHistory: MessageHistory = {
+        id: historyId,
+        recipients: history.failedRecipients.length,
+        message: history.message,
+        criteria: `${history.criteria} (Kirim Ulang Gagal: ${history.sentAt.toLocaleString('id-ID')})`,
+        sentAt: new Date(),
+        status: 'pending',
+        failedRecipients: [],
+        recipientDetails
+      };
+      setMessageHistory(prev => [pendingHistory, ...prev].slice(0, 200));
+
+      for (let i = 0; i < history.failedRecipients.length; i++) {
+        const recipient = history.failedRecipients[i];
+        try {
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === recipient.id ? { ...item, status: 'sending' } : item
+          ));
+
+          const fullCustomer = customers?.find(c => c.id === recipient.id);
+          const personalizedMessage = fullCustomer
+            ? replaceMessagePlaceholders(history.message, fullCustomer)
+            : history.message;
+          const formattedPhone2 = recipient.phone.replace(/[^0-9]/g, '');
+          const chatId2 = formattedPhone2.startsWith('62') ? `${formattedPhone2}@c.us` : `62${formattedPhone2.startsWith('0') ? formattedPhone2.substring(1) : formattedPhone2}@c.us`;
+          const success = await sendWhatsAppMessage(recipient.phone, personalizedMessage);
+          try {
+            await api.createMessageLog({
+              type: 'manual',
+              customerId: String(recipient.id),
+              phone: recipient.phone,
+              chatId: chatId2,
+              message: personalizedMessage,
+              status: success ? 'sent' : 'failed'
+            });
+          } catch {}
+          if (success) {
+            successCount++;
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === recipient.id ? { ...item, status: 'sent' } : item
+            ));
+            recipientDetails[i].status = 'sent';
+          } else {
+            failedCount++;
+            failedAgainDetails.push(recipient);
+            setSendingQueue(prev => prev.map(item =>
+              item.customerId === recipient.id ? { ...item, status: 'failed', error: 'Gagal mengirim' } : item
+            ));
+            recipientDetails[i].status = 'failed';
+          }
+
+          if (i < history.failedRecipients.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, (config?.sendDelayMs ?? 5000)));
+          }
+        } catch (err) {
+          console.error(`Error resend to ${recipient.name}:`, err);
+          failedCount++;
+          failedAgainDetails.push(recipient);
+          setSendingQueue(prev => prev.map(item =>
+            item.customerId === recipient.id ? { ...item, status: 'failed', error: 'Exception saat mengirim' } : item
+          ));
+          recipientDetails[i].status = 'failed';
+        }
+      }
+
+      // Update riwayat pending menjadi final
+      setMessageHistory(prev => prev
+        .map(h =>
+          h.id === historyId
+            ? {
+                ...h,
+                sentAt: new Date(),
+                status: (failedCount === 0 ? 'sent' : failedCount === history.failedRecipients!.length ? 'failed' : 'sent') as MessageHistory['status'],
+                failedRecipients: failedAgainDetails,
+                recipientDetails
+              }
+            : h
+        )
+        .slice(0, 200)
+      );
+
+      if (successCount > 0) {
+        toast({ title: 'Berhasil', description: `Berhasil kirim ulang ${successCount} pesan${failedCount > 0 ? `, ${failedCount} gagal` : ''}` });
+      }
+      if (failedCount > 0) {
+        toast({ title: 'Error', description: `${failedCount} pesan gagal dikirim ulang`, variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('Error in resend failed:', error);
+      toast({ title: 'Error', description: 'Terjadi kesalahan saat kirim ulang pesan', variant: 'destructive' });
+    } finally {
+      setIsSending(false);
+      setSendingQueue([]);
+    }
+  };
+  
+  const saveWahaConfig = async () => {
+    try {
+      console.log('Saving WAHA config:', formConfig);
+      await updateConfig.mutateAsync(formConfig);
+      toast({
+        title: "Berhasil",
+        description: "Konfigurasi WAHA berhasil disimpan!"
+      });
+    } catch (error) {
+      console.error('Error saving WAHA config:', error);
+      toast({
+        title: "Error",
+        description: "Gagal menyimpan konfigurasi WAHA",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const resendLogMessage = async (log: any) => {
+    try {
+      const formattedPhone = String(log.phone || '').replace(/[^0-9]/g, '');
+      const chatId = formattedPhone.startsWith('62')
+        ? `${formattedPhone}@c.us`
+        : `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
+      const success = await sendWhatsAppMessage(log.phone, log.message);
+      try {
+        await api.createMessageLog({
+          type: 'manual',
+          phone: log.phone,
+          customerId: log.customerId,
+          chatId,
+          message: log.message,
+          status: success ? 'sent' : 'failed'
+        });
+      } catch {}
+      toast({ title: success ? 'Berhasil' : 'Gagal', description: success ? 'Kirim ulang berhasil' : 'Kirim ulang gagal', variant: success ? undefined : 'destructive' });
+    } catch (e) {
+      toast({ title: 'Error', description: 'Kesalahan saat kirim ulang pesan', variant: 'destructive' });
+    }
+  };
+
+  const filteredCustomers = getFilteredCustomers();
+
+  if (wahaLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-gray-500">Loading WAHA configuration...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-red-500">Error loading WAHA configuration</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 md:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h1 className="text-xl md:text-3xl font-bold text-gray-900">Pesan WhatsApp</h1>
+          <p className="text-sm md:text-base text-gray-600">Kirim pesan broadcast ke pelanggan</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+            <DialogTrigger asChild>
+              <Button 
+                variant="outline"
+                size="sm"
+                className="text-xs md:text-sm px-2 py-1 md:px-3 md:py-2"
+              >
+                <Settings className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                Setting WAHA
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Pengaturan WAHA</DialogTitle>
+                <DialogDescription>Atur koneksi API WhatsApp (WAHA)</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <Label>Base URL</Label>
+                  <Input
+                    value={formConfig.baseUrl}
+                    onChange={(e) => setFormConfig((prev) => ({ ...prev, baseUrl: e.target.value }))}
+                    placeholder="https://whatsapp.latansa.my.id"
+                  />
+                </div>
+                <div>
+                  <Label>Session</Label>
+                  <Input
+                    value={formConfig.session}
+                    onChange={(e) => setFormConfig((prev) => ({ ...prev, session: e.target.value }))}
+                    placeholder="default"
+                  />
+                </div>
+                <div>
+                  <Label>API Key</Label>
+                  <Input
+                    value={formConfig.apiKey}
+                    onChange={(e) => setFormConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
+                    placeholder="API Key"
+                  />
+                </div>
+                <div>
+                  <Label>Delay Kirim (ms)</Label>
+                  <Input
+                    type="number"
+                    value={String(formConfig.sendDelayMs ?? '')}
+                    onChange={(e) => setFormConfig((prev) => ({ ...prev, sendDelayMs: Number(e.target.value || 0) }))}
+                    placeholder="5000"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => { setShowSettingsDialog(false); setSaveStatus('idle'); setSaveError(null); }}>Batal</Button>
+                  <Button
+                    onClick={async () => {
+                      try {
+                        setSaveStatus('saving');
+                        setSaveError(null);
+                        await updateConfig.mutateAsync(formConfig);
+                        const persisted = await api.get('/settings/waha');
+                        setFormConfig(persisted);
+                        setSaveStatus('saved');
+                        setSaveTimestamp(new Date().toLocaleString('id-ID'));
+                        toast({ title: 'Berhasil', description: 'Konfigurasi WAHA tersimpan' });
+                      } catch (err: any) {
+                        setSaveStatus('error');
+                        setSaveError(err?.message || 'Gagal menyimpan konfigurasi');
+                        toast({ title: 'Gagal', description: 'Tidak dapat menyimpan konfigurasi', variant: 'destructive' });
+                      }
+                    }}
+                  >Simpan</Button>
+                </div>
+                {saveStatus !== 'idle' && (
+                  <div className="mt-3 flex items-center gap-2 text-sm">
+                    {saveStatus === 'saving' && (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Menyimpan konfigurasi...</span>
+                      </>
+                    )}
+                    {saveStatus === 'saved' && (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <span>Tersimpan {saveTimestamp ? `( ${saveTimestamp} )` : ''}</span>
+                      </>
+                    )}
+                    {saveStatus === 'error' && (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-red-600" />
+                        <span>Gagal menyimpan{saveError ? `: ${saveError}` : ''}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Button 
+            onClick={() => setShowBroadcastForm(true)} 
+            className="bg-green-600 hover:bg-green-700 text-xs md:text-sm px-2 py-1 md:px-4 md:py-2"
+            size="sm"
+          >
+            <Send className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+            Kirim Pesan
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
+        <Card>
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center">
+              <MessageSquare className="h-6 w-6 md:h-8 md:w-8 text-blue-600" />
+              <div className="ml-3 md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-600">Total Pesan</p>
+                <p className="text-lg md:text-2xl font-bold text-gray-900">{messageLogs.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center">
+              <MessageSquare className="h-6 w-6 md:h-8 md:w-8 text-green-600" />
+              <div className="ml-3 md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-600">Pesan Terkirim</p>
+                <p className="text-lg md:text-2xl font-bold text-gray-900">
+                  {messageLogs.filter(l => l.status === 'sent').length}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-3 md:p-6">
+            <div className="flex items-center">
+              <MessageSquare className="h-6 w-6 md:h-8 md:w-8 text-red-600" />
+              <div className="ml-3 md:ml-4">
+                <p className="text-xs md:text-sm font-medium text-gray-600">Pesan Gagal Terkirim</p>
+                <p className="text-lg md:text-2xl font-bold text-gray-900">{messageLogs.filter(l => l.status === 'failed').length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Status Pengiriman */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Status Pengiriman</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sendingQueue.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">
+              <Clock className="h-10 w-10 mx-auto mb-2 opacity-50" />
+              <p>Tidak ada proses pengiriman saat ini</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nama</TableHead>
+                  <TableHead>No. WhatsApp</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sendingQueue.map(item => (
+                  <TableRow key={item.id}>
+                    <TableCell className="max-w-xs truncate">{item.name}</TableCell>
+                    <TableCell className="max-w-xs truncate">{item.phone}</TableCell>
+                    <TableCell>
+                      {item.status === 'queued' && (
+                        <Badge className="bg-blue-100 text-blue-800">Dalam Antrian</Badge>
+                      )}
+                      {item.status === 'sending' && (
+                        <Badge className="bg-amber-100 text-amber-800">Sedang Mengirim</Badge>
+                      )}
+                      {item.status === 'sent' && (
+                        <Badge className="bg-green-100 text-green-800">Terkirim</Badge>
+                      )}
+                      {item.status === 'failed' && (
+                        <Badge variant="destructive">Gagal</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Riwayat Pesan (Database) */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Riwayat Pesan</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+            <div>
+              <Label>Tipe</Label>
+              <Select value={logTypeFilter} onValueChange={setLogTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Semua" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua</SelectItem>
+                  <SelectItem value="new_customer">Pelanggan Baru</SelectItem>
+                  <SelectItem value="transaction">Transaksi</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Status</Label>
+              <Select value={logStatusFilter} onValueChange={setLogStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Semua" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua</SelectItem>
+                  <SelectItem value="sent">Terkirim</SelectItem>
+                  <SelectItem value="failed">Gagal</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>No. WhatsApp</Label>
+              <Input value={logPhoneFilter} onChange={(e) => setLogPhoneFilter(e.target.value)} placeholder="Cari nomor" />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={() => fetchMessageLogs()} variant="outline" className="w-full">Refresh</Button>
+            </div>
+          </div>
+
+          {logsLoading ? (
+            <div className="text-center py-6 text-gray-500">Memuat...</div>
+          ) : messageLogs.length === 0 ? (
+            <div className="text-center py-6 text-gray-500">Belum ada data</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Waktu</TableHead>
+                  <TableHead>Tipe</TableHead>
+                  <TableHead>Nama Pelanggan</TableHead>
+                  <TableHead>No. Pelanggan</TableHead>
+                  <TableHead>No. WA</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {messageLogs.map((log: any) => (
+                  <TableRow key={log.id}>
+                    <TableCell>{new Date(log.createdAt).toLocaleString('id-ID')}</TableCell>
+                    <TableCell className="uppercase text-xs">{log.type}</TableCell>
+                    <TableCell>{customers.find(c => String(c.id) === String(log.customerId))?.name || '-'}</TableCell>
+                    <TableCell>{customers.find(c => String(c.id) === String(log.customerId))?.customerNumber || '-'}</TableCell>
+                    <TableCell>{log.phone}</TableCell>
+                    <TableCell>
+                      <Badge className={log.status === 'sent' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>{log.status}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => { setMessageDetailData({ id: String(log.id), message: log.message, criteria: `${log.type} • ${log.status}` }); setMessageDetailOpen(true); }}>Lihat</Button>
+                        <Button size="sm" onClick={() => resendLogMessage(log)}>Kirim Ulang</Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+
+      {/* Dialog: Detail Pesan */}
+      <Dialog open={messageDetailOpen} onOpenChange={(o) => (o ? setMessageDetailOpen(true) : closeMessageDetail())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Detail Pesan</DialogTitle>
+            <DialogDescription>
+              Lihat isi pesan lengkap beserta kriterianya
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Kriteria</Label>
+              <p className="text-sm text-gray-700 mt-1 break-words">
+                {messageDetailData?.criteria || '-'}
+              </p>
+            </div>
+            <div>
+              <Label>Isi Pesan</Label>
+              <pre className="mt-2 p-3 bg-gray-50 border rounded text-sm whitespace-pre-wrap break-words max-h-[60vh] overflow-auto">
+                {messageDetailData?.message || ''}
+              </pre>
+            </div>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={closeMessageDetail}>Tutup</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Seluruh Penerima */}
+      <Dialog open={recipientsDialogOpen} onOpenChange={(o) => (o ? setRecipientsDialogOpen(true) : closeRecipientsDialog())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Seluruh Pelanggan Penerima</DialogTitle>
+            <DialogDescription>
+              Daftar seluruh penerima dan status pengirimannya
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-auto">
+            {recipientsDialogData && recipientsDialogData.recipients.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>No. WhatsApp</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recipientsDialogData.recipients.map((r) => (
+                    <TableRow key={`${recipientsDialogData.id}-${r.id}`}>
+                      <TableCell className="max-w-xs truncate">{r.name}</TableCell>
+                      <TableCell className="max-w-xs truncate">{r.phone}</TableCell>
+                      <TableCell>
+                        {r.status === 'sent' && <Badge className="bg-green-100 text-green-800">Terkirim</Badge>}
+                        {r.status === 'failed' && <Badge variant="destructive">Gagal</Badge>}
+                        {r.status === 'queued' && <Badge className="bg-blue-100 text-blue-800">Antri</Badge>}
+                        {r.status === 'sending' && <Badge className="bg-amber-100 text-amber-800">Mengirim</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-6 text-gray-500">Tidak ada data penerima</div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={closeRecipientsDialog}>Tutup</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* WAHA Settings Dialog */}
+      <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pengaturan WAHA API</DialogTitle>
+            <DialogDescription>
+              Konfigurasi koneksi ke WAHA (WhatsApp HTTP API)
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="baseUrl">Base URL WAHA</Label>
+              <Input
+                id="baseUrl"
+                value={formConfig.baseUrl}
+                onChange={(e) => setFormConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
+                placeholder="http://localhost:3000"
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="session">Nama Session</Label>
+              <Input
+                id="session"
+                value={formConfig.session}
+                onChange={(e) => setFormConfig(prev => ({ ...prev, session: e.target.value }))}
+                placeholder="default"
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="apiKey">API Key (Opsional)</Label>
+              <Input
+                id="apiKey"
+                value={formConfig.apiKey}
+                onChange={(e) => setFormConfig(prev => ({ ...prev, apiKey: e.target.value }))}
+                placeholder="Masukkan API key jika diperlukan"
+              />
+            </div>
+            
+            <div className="flex space-x-2">
+              <Button 
+                variant="outline" 
+                onClick={testWahaConnection}
+                disabled={isTestingConnection}
+                className="flex-1"
+              >
+                {isTestingConnection ? (
+                  <>
+                    <Clock className="h-4 w-4 mr-2 animate-spin" />
+                    Testing...
+                  </>
+                ) : (
+                  'Test Koneksi'
+                )}
+              </Button>
+              
+              {connectionStatus !== 'idle' && (
+                <div className={`px-3 py-2 rounded text-sm ${
+                  connectionStatus === 'success' 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-red-100 text-red-800'
+                }`}>
+                  {connectionStatus === 'success' ? '✓ Berhasil' : '✗ Gagal'}
+                </div>
+              )}
+            </div>
+            
+            <div className="flex justify-end space-x-2">
+              <Button variant="outline" onClick={() => setShowSettingsDialog(false)}>
+                Batal
+              </Button>
+              <Button onClick={saveWahaConfig}>
+                Simpan
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Broadcast Form Dialog */}
+      <Dialog open={showBroadcastForm} onOpenChange={setShowBroadcastForm}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Kirim Pesan Broadcast WhatsApp</DialogTitle>
+            <DialogDescription>
+              Pilih kriteria pelanggan dan tulis pesan yang akan dikirim melalui WhatsApp
+            </DialogDescription>
+          </DialogHeader>
+          
+          <form onSubmit={handleSendMessage} className="space-y-4">
+            {/* Criteria Selection */}
+            <div className="grid grid-cols-2 gap-4">
+              
+              
+              
+              
+              
+              
+              
+              
+              <div>
+                <Label htmlFor="areaFilter">WILAYAH</Label>
+                <Select value={broadcastData.area || 'all'} onValueChange={(value) => handleInputChange('area', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Wilayah" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua</SelectItem>
+                    {(areas || []).map((a) => (
+                      <SelectItem key={a.id || a.name} value={a.name}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="packageFilter">PAKET</Label>
+                <Select value={broadcastData.package || 'all'} onValueChange={(value) => handleInputChange('package', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Paket" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua</SelectItem>
+                    {(packages || []).map((p) => (
+                      <SelectItem key={p.id || p.name} value={p.name}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="odpFilter">ODP</Label>
+                <Select value={broadcastData.odp || 'all'} onValueChange={(value) => handleInputChange('odp', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih ODP" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua</SelectItem>
+                    {(odp || []).map((o) => (
+                      <SelectItem key={o.id || o.name} value={o.name}>{o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="paymentStatus">STATUS PEMBAYARAN</Label>
+                <Select value={broadcastData.paymentStatus} onValueChange={(value) => handleInputChange('paymentStatus', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua Status</SelectItem>
+                    <SelectItem value="paid">Sudah Bayar</SelectItem>
+                    <SelectItem value="unpaid">Belum Bayar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="dateExpiryCriteria">KRITERIA TANGGAL JATUH TEMPO</Label>
+                <Select value={broadcastData.dateExpiryCriteria} onValueChange={(value) => handleInputChange('dateExpiryCriteria', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Kriteria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua</SelectItem>
+                    <SelectItem value="today">Hari Ini</SelectItem>
+                    <SelectItem value="tomorrow">Besok</SelectItem>
+                    <SelectItem value="1_day">1 Hari Lagi</SelectItem>
+                    <SelectItem value="2_days">2 Hari Lagi</SelectItem>
+                    <SelectItem value="3_days">3 Hari Lagi</SelectItem>
+                    <SelectItem value="7_days">7 Hari Lagi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label htmlFor="dateSuspendCriteria">KRITERIA ISOLIR/SUSPEND</Label>
+                <Select value={broadcastData.dateSuspendCriteria} onValueChange={(value) => handleInputChange('dateSuspendCriteria', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih Kriteria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Semua</SelectItem>
+                    <SelectItem value="suspended">Status Suspended</SelectItem>
+                    <SelectItem value="active">Status Active</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            {/* Send to specific customer */}
+            <div>
+              <Label htmlFor="sendToCustomer">KIRIM KE PELANGGAN TERTENTU</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="sendToCustomer"
+                  value={broadcastData.sendToCustomer}
+                  onChange={(e) => handleInputChange('sendToCustomer', e.target.value)}
+                  placeholder="Ketik nama/nomor/HP/alamat atau klik Pilih"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowCustomerPicker(true)}
+                >
+                  Pilih
+                </Button>
+                {broadcastData.sendToCustomer && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleInputChange('sendToCustomer', '')}
+                  >
+                    Hapus
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Ketik untuk mencari cepat, atau klik tombol Pilih untuk membuka daftar pelanggan</p>
+            </div>
+            
+            {/* Message with Template Management */}
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <Label htmlFor="message">PESAN</Label>
+                <div className="flex space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowTemplateDialog(true)}
+                    className="text-xs"
+                  >
+                    <FileText className="h-3 w-3 mr-1" />
+                    Pilih Template
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditingTemplate(null);
+                      setNewTemplate({ name: '', content: '', category: 'general' });
+                      setShowAddTemplateDialog(true);
+                    }}
+                    className="text-xs"
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Buat Template
+                  </Button>
+                </div>
+              </div>
+              <Textarea
+                id="message"
+                value={broadcastData.message}
+                onChange={(e) => handleInputChange('message', e.target.value)}
+                placeholder={
+                  `Tulis pesan Anda di sini...
+
+Gunakan placeholder:
+[NAMA] - Nama pelanggan
+[NOPEL] - Nomor pelanggan
+[PAKET] - Paket internet
+[AREA] - Area pelanggan
+[PHONE] - Nomor HP
+[ADDRESS] - Alamat
+[PRICE] atau [HARGA] - Harga paket
+[ACTIVE_DATE] - Tanggal aktif
+[EXPIRE_DATE] - Tanggal kadaluarsa
+
+Alternatif (gaya kurung kurawal):
+{customerName}, {customerNumber}, {packageName}, {packagePrice}, {area}, {activeDate}, {expireDate}`
+                }
+                rows={8}
+                className="resize-none"
+              />
+            </div>
+            
+            {/* Preview */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-gray-900 mb-2">Preview Penerima:</h4>
+              <p className="text-sm text-gray-600">
+                {filteredCustomers.length} pelanggan akan menerima pesan ini
+              </p>
+              
+              {/* Debug Info */}
+              <div className="mt-2 text-xs text-gray-500">
+                <p>Total pelanggan: {customers?.length || 0}</p>
+                <p>Kriteria aktif: {Object.entries(broadcastData).filter(([key, value]) => 
+                  key !== 'message' && value && value !== 'all' && value.trim() !== ''
+                ).map(([key, value]) => `${key}: ${value}`).join(', ') || 'Tidak ada'}</p>
+                
+                {/* Informasi khusus untuk filter pelanggan tertentu */}
+                {broadcastData.sendToCustomer && broadcastData.sendToCustomer.trim() !== '' && (
+                  <p className="text-blue-600 font-medium">
+                    🔍 Mode pencarian pelanggan tertentu: "{broadcastData.sendToCustomer}"
+                    <br />
+                    <span className="text-xs text-gray-500">
+                      (Filter lain diabaikan saat mencari pelanggan tertentu)
+                    </span>
+                  </p>
+                )}
+              </div>
+              
+              {filteredCustomers.length > 0 && (
+                <div className="mt-2 max-h-32 overflow-y-auto">
+                  <div className="text-xs text-gray-500 space-y-1">
+                    {filteredCustomers.slice(0, 5).map((customer) => (
+                      <div key={customer.id} className="flex justify-between">
+                        <span>{customer.name} ({customer.customerNumber})</span>
+                        <span className="text-gray-400">
+                          {customer.isIsolated ? '🔒' : '✅'} 
+                          {customer.status === 'suspended' ? ' 🚫' : ''}
+                        </span>
+                      </div>
+                    ))}
+                    {filteredCustomers.length > 5 && (
+                      <div className="text-gray-400">... dan {filteredCustomers.length - 5} lainnya</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview Pesan (contoh dari pelanggan pertama) */}
+              {filteredCustomers.length > 0 && (
+                <div className="mt-4">
+                  <h5 className="font-medium text-gray-800 mb-1">Preview Pesan:</h5>
+                  <pre className="mt-1 p-3 bg-white border rounded text-sm whitespace-pre-wrap break-words">
+                    {replaceMessagePlaceholders(broadcastData.message, filteredCustomers[0])}
+                  </pre>
+                  <p className="text-xs text-gray-500 mt-1">Preview diambil dari pelanggan pertama pada daftar penerima.</p>
+                </div>
+              )}
+            </div>
+            
+            {/* Actions */}
+            <div className="flex justify-end space-x-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setShowBroadcastForm(false)}
+                disabled={isSending}
+              >
+                Batal
+              </Button>
+              <Button 
+                type="submit" 
+                className="bg-green-600 hover:bg-green-700"
+                disabled={isSending || filteredCustomers.length === 0}
+              >
+                {isSending ? (
+                  <>
+                    <Clock className="h-4 w-4 mr-2 animate-spin" />
+                    Mengirim...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Kirim Pesan ({filteredCustomers.length})
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer Picker Dialog */}
+      <Dialog open={showCustomerPicker} onOpenChange={setShowCustomerPicker}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pilih Pelanggan</DialogTitle>
+            <DialogDescription>
+              Ketik untuk mencari cepat, lalu klik baris untuk memilih
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Command>
+              <CommandInput
+                placeholder="Ketik untuk cari nama/nomor/HP/alamat/area/paket"
+                value={customerSearch}
+                onValueChange={setCustomerSearch}
+                autoFocus
+              />
+              <CommandList>
+                <CommandEmpty>Tidak ada pelanggan yang cocok</CommandEmpty>
+                <CommandGroup heading="Pelanggan">
+                  {(customers || []).map((c) => (
+                    <CommandItem
+                      key={c.id || c.customerNumber}
+                      value={`${c.name} ${c.customerNumber} ${(c.phone || '').replace(/[^0-9]/g, '')} ${c.address || ''} ${c.area || ''} ${c.package || ''}`}
+                      onSelect={() => {
+                        handleInputChange('sendToCustomer', c.customerNumber);
+                        setShowCustomerPicker(false);
+                      }}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{c.name} <span className="text-xs text-gray-500">({c.customerNumber})</span></span>
+                        <span className="text-xs text-gray-500">HP: {c.phone} • Paket: {c.package} • Area: {c.area}</span>
+                        {c.address && (<span className="text-xs text-gray-400">{c.address}</span>)}
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </div>
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="outline" onClick={() => setShowCustomerPicker(false)}>Tutup</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Selection Dialog */}
+      <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pilih Template Pesan</DialogTitle>
+            <DialogDescription>
+              Pilih template pesan yang sudah tersimpan atau kelola template Anda
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Template List */}
+            {messageTemplates.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Belum ada template pesan</p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingTemplate(null);
+                    setNewTemplate({ name: '', content: '', category: 'general' });
+                    setShowAddTemplateDialog(true);
+                  }}
+                  className="mt-2"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Buat Template Pertama
+                </Button>
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {messageTemplates.map((template) => (
+                  <Card key={template.id} className="cursor-pointer hover:shadow-md transition-shadow">
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-medium text-gray-900">{template.name}</h3>
+                            <Badge className={getCategoryBadgeColor(template.category)}>
+                              {getCategoryLabel(template.category)}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Dibuat: {template.createdAt.toLocaleDateString('id-ID')}
+                          </p>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => editTemplate(template)}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteTemplate(template.id)}
+                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="text-sm text-gray-600 mb-3 max-h-20 overflow-y-auto">
+                        {template.content}
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => useTemplate(template)}
+                        className="w-full"
+                      >
+                        Gunakan Template
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+            
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditingTemplate(null);
+                  setNewTemplate({ name: '', content: '', category: 'general' });
+                  setShowAddTemplateDialog(true);
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Tambah Template
+              </Button>
+              <Button variant="outline" onClick={() => setShowTemplateDialog(false)}>
+                Tutup
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Template Dialog */}
+      <Dialog open={showAddTemplateDialog} onOpenChange={setShowAddTemplateDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingTemplate ? 'Edit Template' : 'Tambah Template Baru'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingTemplate ? 'Ubah template pesan yang sudah ada' : 'Buat template pesan baru untuk digunakan nanti'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="templateName">Nama Template</Label>
+              <Input
+                id="templateName"
+                value={newTemplate.name}
+                onChange={(e) => setNewTemplate(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="Masukkan nama template"
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="templateCategory">Kategori</Label>
+              <Select 
+                value={newTemplate.category} 
+                onValueChange={(value: MessageTemplate['category']) => 
+                  setNewTemplate(prev => ({ ...prev, category: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih kategori" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">Umum</SelectItem>
+                  <SelectItem value="maintenance">Pemeliharaan</SelectItem>
+                  <SelectItem value="payment">Pembayaran</SelectItem>
+                  <SelectItem value="promotion">Promosi</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
+              <Label htmlFor="templateContent">Isi Template</Label>
+              <Textarea
+                id="templateContent"
+                value={newTemplate.content}
+                onChange={(e) => setNewTemplate(prev => ({ ...prev, content: e.target.value }))}
+                placeholder="Tulis isi template di sini...\n\nGunakan placeholder:\n[NAMA] - Nama pelanggan\n[NOPEL] - Nomor pelanggan\n[PAKET] - Paket internet\n[AREA] - Area pelanggan\n[PHONE] - Nomor HP\n[ADDRESS] - Alamat"
+                rows={8}
+                className="resize-none"
+              />
+            </div>
+            
+            <div className="flex justify-end space-x-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowAddTemplateDialog(false);
+                  setEditingTemplate(null);
+                  setNewTemplate({ name: '', content: '', category: 'general' });
+                }}
+              >
+                Batal
+              </Button>
+              <Button onClick={saveTemplate}>
+                {editingTemplate ? 'Perbarui' : 'Simpan'} Template
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default Messages;

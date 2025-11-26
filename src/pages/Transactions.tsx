@@ -1,0 +1,1549 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Search, Filter, Download, Eye, Send, Trash2, Copy, Settings, DollarSign, FileText, Banknote, CreditCard } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/utils/api';
+import { useCustomers } from '@/hooks/useCustomers';
+import { useAreas } from '@/hooks/useAreas';
+import { usePackages } from '@/hooks/usePackages';
+import { useWahaConfig } from '@/hooks/useWahaConfig';
+import { useAppSetting } from '@/hooks/useAppSetting';
+import { Transaction, Customer } from '@/types/isp';
+import { toast } from 'sonner';
+import { getCurrentJakartaTime } from '@/utils/timezone';
+
+
+interface TransactionBreakdown {
+  package: {
+    name: string;
+    price: number;
+    isProRata: boolean;
+    salesId?: string | number;
+    commissionType?: 'percentage' | 'nominal';
+    commissionValue?: number;
+  };
+  monthlyAddons: Array<{
+    name: string;
+    price: number;
+  }>;
+  oneTimeItems: Array<{
+    name: string;
+    price: number;
+  }>;
+  discount: number;
+  totals: {
+    package: number;
+    monthlyAddons: number;
+    oneTimeItems: number;
+    legacyAddon: number;
+    discount: number;
+    grandTotal: number;
+  };
+}
+
+interface TransactionFormData {
+  customerId: string;
+  amount: number;
+  type: 'payment' | 'penalty' | 'discount' | 'refund';
+  method: 'cash' | 'transfer' | 'digital_wallet' | 'other';
+  description: string;
+  period: {
+    from: string;
+    to: string;
+  };
+  notes?: string;
+  // Add missing properties
+  customerSearch: string;
+  selectedCustomer: Customer | null;
+  paymentDate: string;
+  paymentPeriod: {
+    from: string;
+    to: string;
+  };
+  paymentMethod: string;
+  receivedBy: string;
+  packagePrice: number;
+  addonPrice: number;
+  discount: number;
+  totalAmount: number;
+  ppn: number;
+  grandTotal: number;
+}
+
+interface WhatsAppSettings {
+  paymentMessageTemplate: string;
+  receiptMessageTemplate: string;
+  enabled: boolean;
+}
+
+const Transactions = () => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [showReceiptDialog, setShowReceiptDialog] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Hooks
+  const { config: wahaConfig } = useWahaConfig();
+  
+  // Filter states
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [areaFilter, setAreaFilter] = useState('all');
+  const [packageFilter, setPackageFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  
+  // Helper function untuk mendapatkan tanggal dalam timezone Jakarta
+  const getJakartaDate = (date?: Date) => {
+    const now = date || new Date();
+    // Gunakan Intl.DateTimeFormat untuk mendapatkan waktu Jakarta yang akurat
+    const jakartaTimeString = now.toLocaleString('sv-SE', { timeZone: 'Asia/Jakarta' });
+    return new Date(jakartaTimeString);
+  };
+
+  const formatDateForInput = (date: Date) => {
+    // Format YYYY-MM-DD untuk input date
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Form data
+  const [formData, setFormData] = useState<TransactionFormData>(() => {
+    const today = getJakartaDate();
+    
+    // Buat tanggal 1 bulan ini dan 1 bulan depan dalam timezone Jakarta
+    const fromDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const toDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    
+    console.log('=== INITIAL FORM DATA (Jakarta Time) ===');
+    console.log('Today Jakarta:', today.toISOString());
+    console.log('FromDate:', fromDate.toISOString());
+    console.log('ToDate:', toDate.toISOString());
+    console.log('FromDate formatted:', formatDateForInput(fromDate));
+    console.log('ToDate formatted:', formatDateForInput(toDate));
+    
+    return {
+      customerId: '',
+      amount: 0,
+      type: 'payment',
+      method: 'cash',
+      description: '',
+      period: {
+        from: '',
+        to: ''
+      },
+      notes: '',
+      customerSearch: '',
+      selectedCustomer: null,
+      paymentDate: formatDateForInput(today),
+      paymentPeriod: {
+        from: formatDateForInput(fromDate),
+        to: formatDateForInput(toDate)
+      },
+      paymentMethod: 'TUNAI',
+      receivedBy: 'Darwis Asyur',
+      packagePrice: 0,
+      addonPrice: 0,
+      discount: 0,
+      totalAmount: 0,
+      ppn: 0,
+      grandTotal: 0
+    };
+  });
+  
+  // WhatsApp settings
+  const [waSettings, setWaSettings] = useState<WhatsAppSettings>({
+    paymentMessageTemplate: `(Pesan Sistem Otomatis)\n\nHalo {customerName} - {area},\n\nPEMBAYARAN INTERNET ANDA TELAH KAMI TERIMA.\n\nDetail Pembayaran:\n📋 No. Pelanggan: {customerNumber}\n💰 Jumlah: Rp {amount}\n📅 Periode: {period}\n🧾 No. Nota: {receiptNumber}\n\nTerima kasih atas pembayaran Anda.\n\n🔗 Lihat Nota: {receiptUrl}\n\nSalam,\nLATANSA NETWORKS`,
+    receiptMessageTemplate: `📄 Nota Pembayaran
+
+Pelanggan: {customerName}
+No. Pelanggan: {customerNumber}
+Jumlah: Rp {amount}
+Tanggal: {paymentDate}
+
+🔗 {receiptUrl}`,
+    enabled: true
+  });
+  
+  const { customers } = useCustomers();
+  const { areas } = useAreas();
+  const { packages } = usePackages();
+  
+  // Helper functions
+  const searchCustomers = (searchTerm: string) => {
+    const term = (searchTerm || '').toLowerCase();
+    return customers
+      .filter((customer) =>
+        ((customer.name || '').toLowerCase().includes(term)) ||
+        ((customer.customerNumber || '').toLowerCase().includes(term)) ||
+        ((customer.pppSecret || '').toLowerCase().includes(term))
+      )
+      .slice(0, 10); // Batasi ke 10 hasil
+  };
+
+  // Tambahkan fungsi untuk cek status pembayaran
+  const getPaymentStatus = (customer: Customer) => {
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    
+    const lastPayment = transactions
+        .filter(t => t.customerId === customer.id && t.type === 'payment' && t.status === 'paid')
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    
+    if (!lastPayment) return 'Belum Pernah Bayar';
+    
+    const lastPaymentDate = new Date(lastPayment.period.to);
+    const lastPaymentMonth = lastPaymentDate.getMonth();
+    const lastPaymentYear = lastPaymentDate.getFullYear();
+    
+    if (lastPaymentYear > currentYear || 
+        (lastPaymentYear === currentYear && lastPaymentMonth >= currentMonth)) {
+        return `Lunas s/d ${lastPaymentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`;
+    }
+    
+    return 'Belum Lunas Bulan Ini';
+  };
+    const handleCustomerSelect = (customer: Customer) => {
+    const today = getJakartaDate();
+    
+    // Cek apakah pelanggan sudah bayar untuk bulan ini
+    const currentMonth = today.getUTCMonth();
+    const currentYear = today.getUTCFullYear();
+    
+    // Cari transaksi pembayaran terakhir
+    const lastPayment = transactions
+        .filter(t => t.customerId === customer.id && t.type === 'payment' && t.status === 'paid')
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    
+    let fromDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    let toDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    
+    if (lastPayment && lastPayment.period && lastPayment.period.to) {
+        const lastPaymentDate = new Date(lastPayment.period.to);
+        const lastPaymentMonth = lastPaymentDate.getUTCMonth();
+        const lastPaymentYear = lastPaymentDate.getUTCFullYear();
+        
+        // Jika sudah bayar untuk bulan ini atau lebih baru
+        if (lastPaymentYear > currentYear || 
+            (lastPaymentYear === currentYear && lastPaymentMonth >= currentMonth)) {
+            
+            // Tampilkan peringatan
+            toast.warning(`Pelanggan ${customer.name} sudah lunas untuk periode ${lastPaymentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}`);
+            
+            // Tawarkan periode selanjutnya
+            const nextMonth = lastPaymentMonth + 1;
+            const nextYear = nextMonth > 11 ? lastPaymentYear + 1 : lastPaymentYear;
+            const adjustedMonth = nextMonth > 11 ? 0 : nextMonth;
+            
+            fromDate = new Date(Date.UTC(nextYear, adjustedMonth, 1));
+            toDate = new Date(Date.UTC(nextYear, adjustedMonth + 1, 1));
+            
+            // Konfirmasi dengan user
+            if (!confirm(`Pelanggan sudah lunas untuk bulan ini. Lanjutkan dengan periode ${fromDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}?`)) {
+                return; // Batalkan
+            }
+        }
+    }
+    
+    console.log('=== HANDLE CUSTOMER SELECT (Jakarta Time) ===');
+    console.log('Today Jakarta:', today.toISOString());
+    console.log('FromDate:', fromDate.toISOString());
+    console.log('ToDate:', toDate.toISOString());
+    console.log('FromDate formatted:', formatDateForInput(fromDate));
+    console.log('ToDate formatted:', formatDateForInput(toDate));
+    console.log('Customer:', customer.name);
+    
+    // Calculate totals without decimals
+    const packagePrice = Math.round(customer.packagePrice || 0);
+    const addonPrice = Math.round(customer.addonPrice || 0);
+    const discount = Math.round(customer.discount || 0);
+    const totalAmount = packagePrice + addonPrice - discount;
+    const ppnAmount = 0;
+    const grandTotal = totalAmount + ppnAmount;
+    
+    setFormData(prev => {
+        const newData = {
+            ...prev,
+            selectedCustomer: customer,
+            customerSearch: `${customer.customerNumber} - ${customer.name}`,
+            customerId: customer.id,
+            packagePrice,
+            addonPrice,
+            discount,
+            totalAmount,
+            ppn: ppnAmount,
+            grandTotal,
+            paymentDate: formatDateForInput(today),
+            paymentPeriod: {
+                from: formatDateForInput(fromDate),
+                to: formatDateForInput(toDate)
+            }
+        };
+        
+        console.log('New formData.paymentPeriod:', newData.paymentPeriod);
+        return newData;
+    });
+  };
+  
+  // Mock transactions data - replace with actual API call
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  
+  // Server-persisted WhatsApp settings for transactions
+  const { setting: serverWaSettings, saveSetting: saveTxnWaSetting } = useAppSetting<WhatsAppSettings>('whatsapp-settings', {
+    paymentMessageTemplate: `(Pesan Sistem Otomatis)\n\nHalo {customerName} - {area},\n\nPEMBAYARAN INTERNET ANDA TELAH KAMI TERIMA.\n\nDetail Pembayaran:\n📋 No. Pelanggan: {customerNumber}\n💰 Jumlah: Rp {amount}\n📅 Periode: {period}\n🧾 No. Nota: {receiptNumber}\n\nTerima kasih atas pembayaran Anda.\n\n🔗 Lihat Nota: {receiptUrl}\n\nSalam,\nLATANSA NETWORKS`,
+    receiptMessageTemplate: `Halo {customerName},
+
+Terima kasih. Kami telah menerima pembayaran Anda sebesar Rp {amount} untuk periode {period}.
+No. Nota: {receiptNumber}
+Link Nota: {receiptUrl}`,
+    enabled: true
+  });
+
+  // Sinkronkan WA settings dari server ketika berubah
+  useEffect(() => {
+    if (serverWaSettings) {
+      setWaSettings(serverWaSettings);
+    }
+  }, [serverWaSettings]);
+
+  // Muat transaksi sekali saat mount
+  useEffect(() => {
+    loadTransactions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  
+  const loadTransactions = async () => {
+    try {
+      const response = await api.getTransactions();
+      if (response.success) {
+        setTransactions(response.data);
+      } else {
+        console.error('Failed to load transactions:', response.message);
+        // Fallback to empty array if API fails
+        setTransactions([]);
+      }
+    } catch (error) {
+      console.error('Error loading transactions:', error);
+      setTransactions([]);
+    }
+  };
+  
+
+  
+  type FieldValue = string | number | boolean | Date | null;
+  const handleInputChange = (field: string, value: FieldValue) => {
+    if (field.includes('.')) {
+      const [parent, child] = field.split('.');
+      setFormData(prev => {
+        const parentValue = prev[parent as keyof TransactionFormData];
+        // Pastikan parentValue adalah object sebelum melakukan spread
+        if (typeof parentValue === 'object' && parentValue !== null) {
+          return {
+            ...prev,
+            [parent]: {
+              ...parentValue,
+              [child]: value
+            }
+          };
+        }
+        // Fallback jika parentValue bukan object
+        return {
+          ...prev,
+          [parent]: {
+            [child]: value
+          }
+        };
+      });
+    } else {
+      setFormData(prev => ({ ...prev, [field]: value }));
+    }
+  };
+  
+  const generateReceiptUrl = (receiptNumber: string, autoPdf: boolean = false) => {
+    return `https://nota.latansa.my.id/nota.php?receiptNumber=${receiptNumber}`;
+  };
+  
+  const replaceMessagePlaceholders = (template: string, transaction: Transaction, customer: Customer) => {
+    return template
+      .replace(/{customerName}/g, customer.name)
+      .replace(/{customerNumber}/g, customer.customerNumber)
+      .replace(/{amount}/g, transaction.amount.toString())
+      .replace(/{amount:,}/g, transaction.amount.toLocaleString('id-ID'))
+      .replace(/{period}/g, `${new Date(transaction.period.from).toLocaleDateString('id-ID')} - ${new Date(transaction.period.to).toLocaleDateString('id-ID')}`)
+      .replace(/{receiptNumber}/g, transaction.receiptNumber || '')
+      .replace(/{paymentDate}/g, new Date(transaction.paidAt || transaction.createdAt).toLocaleDateString('id-ID'))
+      .replace(/{receiptUrl}/g, generateReceiptUrl(transaction.receiptNumber || ''));
+  };
+  
+  const sendWhatsAppNotification = async (transaction: Transaction, customer: Customer) => {
+    if (!waSettings.enabled) {
+      console.log('WhatsApp notifications disabled');
+      return;
+    }
+    
+    // Siapkan variabel agar bisa dipakai di catch
+    let chatId = '';
+    let message = '';
+
+    try {
+      // Check WAHA config from hook
+      if (!wahaConfig || !wahaConfig.baseUrl || !wahaConfig.session) {
+        console.warn('WAHA config not found or incomplete:', wahaConfig);
+        toast.error('Konfigurasi WAHA tidak lengkap. Silakan atur di halaman Messages.');
+        return;
+      }
+      
+      // Format phone number (remove +, spaces, etc.)
+      const formattedPhone = customer.phone.replace(/[^0-9]/g, '');
+      chatId = formattedPhone.startsWith('62') ? 
+        `${formattedPhone}@c.us` : 
+        `62${formattedPhone.startsWith('0') ? formattedPhone.substring(1) : formattedPhone}@c.us`;
+      
+      // Generate receipt URL
+      const receiptUrl = generateReceiptUrl(transaction.receiptNumber || '');
+      
+      // Prepare period text
+      let periodText;
+      if (!transaction.period || !transaction.period.from || !transaction.period.to) {
+        console.warn('Transaction period data is incomplete:', transaction.period);
+        periodText = 'Periode tidak tersedia';
+      } else {
+        periodText = `${new Date(transaction.period.from).toLocaleDateString('id-ID')} - ${new Date(transaction.period.to).toLocaleDateString('id-ID')}`;
+      }
+      
+      // Ambil template aktif dari DB (scope: transaction) jika tersedia
+      try {
+        const tmplResp = await api.getMessageTemplates({ scope: 'transaction', isActive: true, limit: 1 });
+        const tmpl = tmplResp.data && tmplResp.data[0];
+        if (tmpl && tmpl.content) {
+          waSettings.paymentMessageTemplate = tmpl.content;
+        }
+      } catch (err) {
+        console.error('Gagal memuat template transaksi dari database', err);
+      }
+
+      // Replace placeholders in template
+      message = waSettings.paymentMessageTemplate
+        .replace(/{customerName}/g, customer.name)
+        .replace(/{area}/g, customer.area || '')
+        .replace(/{customerNumber}/g, customer.customerNumber || '')
+        .replace(/{packageName}/g, customer.package || '')
+        .replace(/{amount}/g, transaction.amount.toLocaleString('id-ID'))
+        .replace(/{amount:,}/g, transaction.amount.toLocaleString('id-ID'))
+        .replace(/{period}/g, periodText)
+        .replace(/{receiptNumber}/g, transaction.receiptNumber || '')
+        .replace(/{receiptUrl}/g, receiptUrl);
+      
+      console.log('Sending WhatsApp notification to:', customer.phone);
+      console.log('Formatted chatId:', chatId);
+      console.log('Message:', message);
+      
+      // Check session status first
+      const sessionCheck = await fetch(`${wahaConfig.baseUrl}/api/sessions/${wahaConfig.session}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(wahaConfig.apiKey && { 'X-Api-Key': wahaConfig.apiKey })
+        }
+      });
+      
+      if (!sessionCheck.ok) {
+        throw new Error(`Session ${wahaConfig.session} tidak tersedia atau tidak aktif`);
+      }
+      
+      const sessionData = await sessionCheck.json();
+      if (sessionData.status !== 'WORKING') {
+        throw new Error(`Session status: ${sessionData.status}. Session harus dalam status WORKING`);
+      }
+      
+      // Try multiple endpoints
+      const endpoints = [
+        `${wahaConfig.baseUrl}/api/sendText`,
+        `${wahaConfig.baseUrl}/api/${wahaConfig.session}/sendText`,
+        `${wahaConfig.baseUrl}/api/sessions/${wahaConfig.session}/chats/${chatId}/messages`,
+        `${wahaConfig.baseUrl}/api/v1/sessions/${wahaConfig.session}/chats/${chatId}/messages/text`
+      ];
+      
+      const payloads = [
+        {
+          session: wahaConfig.session,
+          chatId: chatId,
+          text: message
+        },
+        {
+          chatId: chatId,
+          text: message
+        },
+        {
+          text: message
+        },
+        {
+          text: message
+        }
+      ];
+      
+      // Try each endpoint until one succeeds
+      for (let i = 0; i < endpoints.length; i++) {
+        try {
+          console.log(`Mencoba endpoint ${i + 1}: ${endpoints[i]}`);
+          
+          const response = await fetch(endpoints[i], {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(wahaConfig.apiKey && { 'X-Api-Key': wahaConfig.apiKey })
+            },
+            body: JSON.stringify(payloads[i])
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`WhatsApp notification sent successfully via endpoint ${i + 1}:`, result);
+            toast.success(`Notifikasi WhatsApp berhasil dikirim ke ${customer.name}`);
+            try {
+              await api.createMessageLog({
+                type: 'transaction',
+                customerId: String(customer.id),
+                phone: customer.phone,
+                chatId,
+                message,
+                status: 'sent'
+              });
+            } catch (err) {
+              console.error('Gagal menyimpan log pesan transaksi (sent)', err);
+            }
+            return true;
+          } else {
+            console.log(`Endpoint ${i + 1} gagal:`, response.status, response.statusText);
+          }
+        } catch (endpointError) {
+          console.log(`Error pada endpoint ${i + 1}:`, endpointError);
+        }
+      }
+      
+      throw new Error('Semua endpoint gagal. Periksa konfigurasi WAHA API.');
+      
+      } catch (error) {
+        console.warn('WhatsApp notification failed:', error);
+        toast.error('Gagal mengirim notifikasi WhatsApp');
+        try {
+          await api.createMessageLog({
+            type: 'transaction',
+            customerId: String(customer.id),
+            phone: customer.phone,
+            chatId,
+            message,
+            status: 'failed',
+            error: (error as Error).message
+          });
+        } catch (err) {
+          console.error('Gagal menyimpan log pesan transaksi (failed)', err);
+        }
+        return false;
+      }
+  };
+  const generateReceiptNumber = (existingTransactions: Transaction[]): string => {
+    const now = getCurrentJakartaTime();
+    const prefix = `${String(now.getDate()).padStart(2, '0')}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear()).slice(-2)}`;
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const monthlyTransactions = existingTransactions.filter(t => {
+      const created = new Date(t.createdAt);
+      return created >= startOfMonth && created < startOfNextMonth;
+    });
+    let seq = monthlyTransactions.length + 1;
+    return `${prefix}${String(seq).padStart(3, '0')}`;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.selectedCustomer) return;
+
+    setIsLoading(true);
+    try {
+        const customer = formData.selectedCustomer;
+        const today = new Date();
+        
+        // Gunakan periode yang sudah dihitung di handleCustomerSelect
+        // JANGAN hitung ulang di sini untuk menghindari inkonsistensi
+        const fromDate = new Date(formData.paymentPeriod.from);
+        const toDate = new Date(formData.paymentPeriod.to);
+        
+        // Tanggal expire customer = toDate
+        const newExpireDate = toDate;
+        
+        // Payment due date = tanggal 5 bulan setelah toDate
+        const newPaymentDueDate = new Date(toDate);
+        newPaymentDueDate.setDate(5);
+
+        // Buat transaksi baru
+            // Buat breakdown untuk transaksi
+            // Cari package data lengkap berdasarkan nama package customer
+            const packageData = packages.find(pkg => pkg.name === customer.package);
+
+            // Buat breakdown untuk transaksi dengan salesId
+            const transactionBreakdown: TransactionBreakdown = {
+                package: {
+                    name: customer.package || '',
+                    price: formData.packagePrice,
+                    isProRata: false,
+                    // Tambahkan salesId untuk kalkulasi komisi
+                    salesId: packageData?.salesId,
+                    commissionType: packageData?.commissionType,
+                    commissionValue: packageData?.commissionValue
+                },
+                monthlyAddons: [],
+                oneTimeItems: [],
+                discount: formData.discount,
+                totals: {
+                    package: formData.packagePrice,
+                    monthlyAddons: 0,
+                    oneTimeItems: 0,
+                    legacyAddon: formData.addonPrice,
+                    discount: formData.discount,
+                    grandTotal: formData.grandTotal
+                }
+            };
+
+            const methodMapped: 'cash' | 'transfer' | 'digital_wallet' | 'other' =
+              formData.paymentMethod === 'TUNAI'
+                ? 'cash'
+                : formData.paymentMethod === 'TRANSFER'
+                ? 'transfer'
+                : 'other';
+
+            const newTransaction = {
+                customerId: customer.id!,
+                customerName: customer.name,
+                amount: formData.grandTotal,
+                type: 'payment' as const,
+                method: methodMapped,
+                description: formData.description,
+                status: 'paid' as const,
+                paidAt: new Date(),
+                dueDate: new Date(formData.paymentDate),
+                receiptNumber: generateReceiptNumber(transactions),
+                period: {
+                    from: fromDate,
+                    to: toDate
+                },
+                receivedBy: formData.receivedBy,
+                notes: formData.notes,
+                breakdown: JSON.stringify(transactionBreakdown),
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            // Simpan transaksi
+            const response = await api.createTransaction(newTransaction);
+        if (response.success) {
+            // Update customer
+            const updatedCustomer = {
+                ...customer,
+                status: 'active' as const,
+                billingStatus: 'lunas' as const,
+                serviceStatus: 'active' as const,
+                mikrotikStatus: 'active' as const,
+                activeDate: fromDate.toISOString(),
+                expireDate: newExpireDate.toISOString(),
+                paymentDueDate: newPaymentDueDate.toISOString(),
+                lastPaymentDate: new Date().toISOString(),
+                nextBillingDate: newPaymentDueDate.toISOString(),
+                lastSuspendDate: null,
+                isIsolated: false
+            };
+
+            await api.updateCustomer(customer.id, updatedCustomer);
+            // Inform ODP consumers that customer updates may affect ODP utilization
+            try {
+              window.dispatchEvent(new CustomEvent('odpRefresh'));
+            } catch (err) {
+              console.error('Gagal memicu event refresh ODP', err);
+            }
+            
+            // TODO: Aktifkan kembali PPP Secret di MikroTik
+            // await mikrotikAPI.enablePPPSecret(customer.router, customer.pppSecret);
+        
+        // Reload data
+        await loadTransactions();
+        
+        // Hapus bagian preview - langsung tutup form
+        setShowAddForm(false);
+        
+        // Reset form
+        setFormData({
+          customerId: '',
+          amount: 0,
+          type: 'payment',
+          method: 'cash',
+          description: '',
+          period: { from: '', to: '' },
+          notes: '',
+          customerSearch: '',
+          selectedCustomer: null,
+          paymentDate: new Date().toISOString().split('T')[0],
+          paymentPeriod: { from: '', to: '' },
+          paymentMethod: 'TUNAI',
+          receivedBy: 'Dzawin Nuha',
+          packagePrice: 0,
+          addonPrice: 0,
+          discount: 0,
+          totalAmount: 0,
+          ppn: 0,
+          grandTotal: 0
+        });
+
+        // Send WhatsApp notification dan tampilkan notifikasi hasil
+        if (waSettings.enabled) {
+          try {
+            await sendWhatsAppNotification(response.data, customer);
+            toast.success('Pembayaran berhasil disimpan dan notifikasi WhatsApp berhasil dikirim!');
+          } catch (whatsappError) {
+            console.error('Error sending WhatsApp notification:', whatsappError);
+            toast.success('Pembayaran berhasil disimpan, tetapi gagal mengirim notifikasi WhatsApp');
+          }
+        } else {
+          toast.success('Pembayaran berhasil disimpan!');
+        }
+      }
+    } catch (error) {
+      console.error('Error saving transaction:', error);
+      toast.error('Gagal menyimpan pembayaran');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Filter transactions
+  const filteredTransactions = transactions.filter(transaction => {
+    const customer = customers.find(c => c.id === transaction.customerId);
+    if (!customer) return false;
+    
+    // Search filter
+    const term = (searchTerm || '').toLowerCase();
+    const searchMatch = !term || 
+      ((customer.name || '').toLowerCase().includes(term)) ||
+      ((customer.customerNumber || '').toLowerCase().includes(term)) ||
+      ((customer.pppSecret || '').toLowerCase().includes(term)) ||
+      ((transaction.description || '').toLowerCase().includes(term));
+    
+    // Payment method filter
+    const methodMatch = paymentMethodFilter === 'all' || transaction.method === paymentMethodFilter;
+    
+    // Area filter
+    const areaMatch = areaFilter === 'all' || customer.area === areaFilter;
+    
+    // Package filter
+    const packageMatch = packageFilter === 'all' || customer.package === packageFilter;
+    
+    // Date filter
+    const dateMatch = (!dateFrom || new Date(transaction.createdAt) >= new Date(dateFrom)) &&
+                     (!dateTo || new Date(transaction.createdAt) <= new Date(dateTo));
+    
+    return searchMatch && methodMatch && areaMatch && packageMatch && dateMatch;
+  });
+  
+  const handleDelete = (transactionId: string) => {
+    setConfirmDeleteId(transactionId);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDeleteId) return;
+    try {
+      const result = await api.deleteTransaction(confirmDeleteId);
+      if (result?.success !== false) {
+        setTransactions(prev => prev.filter(t => t.id !== confirmDeleteId));
+        toast.success('Transaksi berhasil dihapus');
+      } else {
+        throw new Error('Gagal menghapus transaksi dari server');
+      }
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      toast.error('Gagal menghapus transaksi');
+    } finally {
+      setShowDeleteConfirm(false);
+      setConfirmDeleteId(null);
+    }
+  };
+  
+  const handlePrintReceipt = (transaction: Transaction) => {
+    // Langsung buka URL nota PDF di tab baru
+    const url = generateReceiptUrl(transaction.receiptNumber || '');
+    window.open(url, '_blank');
+  };
+  
+  const handleResendNotification = async (transaction: Transaction) => {
+    const customer = customers.find(c => c.id === transaction.customerId);
+    if (customer) {
+      await sendWhatsAppNotification(transaction, customer);
+    }
+  };
+  
+  const saveWhatsAppSettings = async () => {
+    try {
+      await saveTxnWaSetting.mutateAsync(waSettings);
+      setShowSettingsDialog(false);
+      toast.success('Pengaturan WhatsApp berhasil disimpan');
+    } catch (e) {
+      toast.error('Gagal menyimpan pengaturan WhatsApp');
+    }
+  };
+  
+  const exportData = () => {
+    const csvContent = [
+      ['Tanggal', 'No. Pelanggan', 'Nama', 'Area', 'Paket', 'Jumlah', 'Metode', 'No. Nota'].join(','),
+      ...filteredTransactions.map(transaction => {
+        const customer = customers.find(c => c.id === transaction.customerId);
+        return [
+          new Date(transaction.createdAt).toLocaleDateString('id-ID'),
+          customer?.customerNumber || '',
+          customer?.name || '',
+          customer?.area || '',
+          customer?.package || '',
+          transaction.amount,
+          transaction.method,
+          transaction.receiptNumber || ''
+        ].join(',');
+      })
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transaksi-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+  
+  const copyReceiptUrl = (receiptNumber: string) => {
+    const url = generateReceiptUrl(receiptNumber);
+    navigator.clipboard.writeText(url);
+    toast.success('Link nota berhasil disalin!');
+  };
+
+  const handlePrintInvoice = () => {
+    if (selectedTransaction) {
+      const url = generateReceiptUrl(selectedTransaction.receiptNumber, true);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleDownloadInvoice = () => {
+    if (selectedTransaction) {
+      const url = generateReceiptUrl(selectedTransaction.receiptNumber, true);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleCopyInvoiceLink = () => {
+    if (selectedTransaction) {
+      const url = generateReceiptUrl(selectedTransaction.receiptNumber, true);
+      navigator.clipboard.writeText(url);
+      toast.success('Link invoice berhasil disalin!');
+    }
+  };
+
+
+
+  return (
+    <div className="p-3 md:p-6 space-y-4 md:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Transaksi Pembayaran</h1>
+          <p className="text-sm md:text-base text-gray-600">Pengelolaan pembayaran tagihan</p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+            <DialogTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="sm"
+                className="text-xs md:text-sm px-2 py-1 md:px-3 md:py-2"
+              >
+                <Settings className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                Setting WA
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Pengaturan Format Pesan WhatsApp</DialogTitle>
+                <DialogDescription>
+                  Atur template pesan untuk notifikasi pembayaran dan nota
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <Label>Template Pesan Pembayaran</Label>
+                  <Textarea
+                    value={waSettings.paymentMessageTemplate}
+                    onChange={(e) => setWaSettings(prev => ({ ...prev, paymentMessageTemplate: e.target.value }))}
+                    rows={10}
+                    placeholder="Template pesan untuk notifikasi pembayaran..."
+                  />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Placeholder: {'{customerName}'}, {'{customerNumber}'}, {'{packageName}'}, {'{amount}'}, {'{period}'}, {'{receiptNumber}'}, {'{receiptUrl}'}
+                  </p>
+                </div>
+                <div>
+                  <Label>Template Pesan Nota</Label>
+                  <Textarea
+                    value={waSettings.receiptMessageTemplate}
+                    onChange={(e) => setWaSettings(prev => ({ ...prev, receiptMessageTemplate: e.target.value }))}
+                    rows={6}
+                    placeholder="Template pesan untuk pengiriman nota..."
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="wa-enabled"
+                    checked={waSettings.enabled}
+                    onChange={(e) => setWaSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                  />
+                  <Label htmlFor="wa-enabled">Aktifkan notifikasi WhatsApp</Label>
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <Button variant="outline" onClick={() => setShowSettingsDialog(false)}>Batal</Button>
+                  <Button onClick={saveWhatsAppSettings}>Simpan</Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Filter & Controls Section */}
+      <Card>
+        <CardHeader className="pb-3 md:pb-6">
+          <CardTitle className="text-lg md:text-xl">Filter & Pencarian</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 md:space-y-4">
+          {/* Baris 1: Button Pembayaran Baru, Pencarian, Export */}
+          <div className="flex flex-wrap items-center gap-2 md:gap-4 mb-3 md:mb-4">
+            <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
+              <DialogTrigger asChild>
+                <Button 
+                  className="bg-blue-600 hover:bg-blue-700 text-xs md:text-sm px-2 py-1 md:px-4 md:py-2"
+                  size="sm"
+                >
+                  <Plus className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                  Pembayaran
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-6xl w-[50vw] max-h-[80vh] h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Transaksi Pembayaran Tagihan</DialogTitle>
+                  <DialogDescription>
+                    Masukkan data pembayaran tagihan pelanggan
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Customer Search - Improved with reset functionality */}
+                  <div className="space-y-2">
+                    <Label className="text-base font-medium">Pilih Pelanggan</Label>
+                    <div className="relative">
+                      <Input
+                        value={formData.customerSearch}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, customerSearch: e.target.value }));
+                        }}
+                        placeholder="Ketik nama, nopel, atau ppp secret..."
+                        className="w-full"
+                        autoFocus
+                        disabled={!!formData.selectedCustomer}
+                      />
+                      {formData.selectedCustomer && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2"
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              selectedCustomer: null,
+                              customerSearch: '',
+                              packagePrice: 0,
+                              addonPrice: 0,
+                              discount: 0,
+                              totalAmount: 0,
+                              ppn: 0,
+                              grandTotal: 0
+                            }));
+                          }}
+                        >
+                          Ganti Pelanggan
+                        </Button>
+                      )}
+                      {formData.customerSearch && !formData.selectedCustomer && (
+                        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                          {searchCustomers(formData.customerSearch).map(customer => (
+                            <div
+                              key={customer.id}
+                              className="p-3 hover:bg-gray-100 cursor-pointer border-b"
+                              onClick={() => handleCustomerSelect(customer)}
+                            >
+                              <div className="font-medium">{customer.name}</div>
+                              <div className="text-sm text-gray-500">
+                                {customer.customerNumber} • {customer.pppSecret} • {customer.area} • {customer.package}
+                              </div>
+                            </div>
+                          ))}
+                          {searchCustomers(formData.customerSearch).length === 0 && (
+                            <div className="p-3 text-gray-500 text-center">
+                              Tidak ada pelanggan yang ditemukan
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Customer Details - Enhanced with confirmation */}
+                      {formData.selectedCustomer && (
+                        <>
+                          <div className="bg-green-50 border border-green-200 p-4 rounded-lg">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="font-medium text-green-800">✓ Pelanggan Terpilih</h3>
+                              <Badge variant="secondary" className="bg-green-600 text-white">
+                                {formData.selectedCustomer.customerNumber}
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-600">Nama:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.name}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">No. Pelanggan:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.customerNumber}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Area:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.area}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Paket:</span> 
+                                <span className="font-medium ml-1">{formData.selectedCustomer.package}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Status Pembayaran */}
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">Status Pembayaran:</span>
+                              <span className={`text-sm px-2 py-1 rounded ${
+                                  getPaymentStatus(formData.selectedCustomer).includes('Lunas') 
+                                      ? 'bg-green-100 text-green-700' 
+                                      : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                  {getPaymentStatus(formData.selectedCustomer)}
+                              </span>
+                            </div>
+                          </div>
+
+                      {/* Payment Details */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>Tanggal Pembayaran</Label>
+                          <Input
+                            type="date"
+                            value={formData.paymentDate}
+                            onChange={(e) => setFormData(prev => ({ ...prev, paymentDate: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <Label>Metode Pembayaran</Label>
+                          <Select value={formData.paymentMethod} onValueChange={(value) => setFormData(prev => ({ ...prev, paymentMethod: value }))}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="TUNAI">TUNAI</SelectItem>
+                              <SelectItem value="TRANSFER">TRANSFER</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {/* Payment Period dengan Helper Text */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>Periode Dari</Label>
+                          <Input
+                            type="date"
+                            value={formData.paymentPeriod.from}
+                            onChange={(e) => setFormData(prev => ({ 
+                              ...prev, 
+                              paymentPeriod: { ...prev.paymentPeriod, from: e.target.value }
+                            }))}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Default: Tanggal 1 bulan ini
+                          </p>
+                        </div>
+                        <div>
+                          <Label>Periode Sampai</Label>
+                          <Input
+                            type="date"
+                            value={formData.paymentPeriod.to}
+                            onChange={(e) => setFormData(prev => ({ 
+                              ...prev, 
+                              paymentPeriod: { ...prev.paymentPeriod, to: e.target.value }
+                            }))}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Default: Tanggal 1 bulan depan
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Payment Calculation */}
+                      <div className="bg-blue-50 p-4 rounded-lg">
+                        <h3 className="font-medium mb-3">Rincian Pembayaran</h3>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span>Harga Paket:</span>
+                            <span>Rp {formData.packagePrice.toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Addon:</span>
+                            <span>Rp {formData.addonPrice.toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Diskon:</span>
+                            <span>- Rp {formData.discount.toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>PPN:</span>
+                            <span>Rp {formData.ppn.toLocaleString('id-ID')}</span>
+                          </div>
+                          <hr />
+                          <div className="flex justify-between font-bold">
+                            <span>Total Bayar:</span>
+                            <span>Rp {formData.grandTotal.toLocaleString('id-ID')}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Received By */}
+                      <div>
+                        <Label>Diterima Oleh</Label>
+                        <Select value={formData.receivedBy} onValueChange={(value) => setFormData(prev => ({ ...prev, receivedBy: value }))}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Darwis Asyur">Darwis Asyur</SelectItem>
+                            <SelectItem value="Dzawin Nuha">Dzawin Nuha</SelectItem>
+                            <SelectItem value="Latansa Networks">Latansa Networks</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      {/* Notes */}
+                      <div>
+                        <Label>Tambahkan Keterangan / Catatan Pembayaran</Label>
+                        <Textarea
+                          value={formData.notes}
+                          onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                          placeholder="Catatan tambahan..."
+                          rows={3}
+                        />
+                      </div>
+                      
+                      {/* Action Buttons */}
+                      <div className="flex justify-end space-x-2">
+                        <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>BATAL</Button>
+                        <Button type="submit" disabled={isLoading} className="bg-blue-600 hover:bg-blue-700">
+                          {isLoading ? 'Menyimpan...' : 'BAYAR'}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </form>
+              </DialogContent>
+            </Dialog>
+
+            <div className="flex-1 min-w-64">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Cari nama, nopel, ppp secret, keterangan..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 w-full"
+                />
+              </div>
+            </div>
+
+            <Button variant="outline" size="sm" className="bg-green-500 text-white hover:bg-green-600" onClick={exportData}>
+              <Download className="h-4 w-4 mr-2" />
+              Export Data
+            </Button>
+          </div>
+
+          {/* Baris 2: Filter Tanggal (Grid responsif) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 mb-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Tanggal Dari</Label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Tanggal Sampai</Label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          {/* Baris 3: Filter Dropdown (Grid responsif dengan label) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Jenis Pembayaran</Label>
+              <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pilih jenis pembayaran" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Pembayaran</SelectItem>
+                  <SelectItem value="cash">Tunai</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Wilayah</Label>
+              <Select value={areaFilter} onValueChange={setAreaFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pilih wilayah" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Wilayah</SelectItem>
+                  {areas.map(area => (
+                    <SelectItem key={area.id} value={area.name}>{area.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Paket</Label>
+              <Select value={packageFilter} onValueChange={setPackageFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Pilih paket" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Paket</SelectItem>
+                  {packages.map(pkg => (
+                    <SelectItem key={pkg.id} value={pkg.name}>{pkg.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Statistics - Fixed without "k" suffix */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        {/* Total Transaksi */}
+        <Card className="border-l-4 border-l-blue-500">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-bold text-blue-600">{filteredTransactions.length}</div>
+                <div className="text-xs text-gray-500">Total Transaksi</div>
+              </div>
+              <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <FileText className="h-4 w-4 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Total Pembayaran */}
+        <Card className="border-l-4 border-l-green-500">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-bold text-green-600">
+                  {Math.round(
+                    filteredTransactions
+                      .filter(t => t.status === 'paid')
+                      .reduce((sum, t) => sum + (parseFloat(t.amount?.toString() || '0') || 0), 0)
+                  ).toLocaleString('id-ID')}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {filteredTransactions.filter(t => t.status === 'paid').length} transaksi lunas
+                </div>
+              </div>
+              <div className="h-8 w-8 bg-green-100 rounded-full flex items-center justify-center">
+                <DollarSign className="h-4 w-4 text-green-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Pembayaran Tunai */}
+        <Card className="border-l-4 border-l-purple-500">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-bold text-purple-600">
+                  {filteredTransactions.filter(t => t.method === 'cash').length}
+                </div>
+                <div className="text-xs text-gray-500">Pembayaran Tunai</div>
+              </div>
+              <div className="h-8 w-8 bg-purple-100 rounded-full flex items-center justify-center">
+                <Banknote className="h-4 w-4 text-purple-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Pembayaran Transfer */}
+        <Card className="border-l-4 border-l-orange-500">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-bold text-orange-600">
+                  {filteredTransactions.filter(t => t.method === 'transfer').length}
+                </div>
+                <div className="text-xs text-gray-500">Pembayaran Transfer</div>
+              </div>
+              <div className="h-8 w-8 bg-orange-100 rounded-full flex items-center justify-center">
+                <CreditCard className="h-4 w-4 text-orange-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Table - Same style as Customers page */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-full">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12 whitespace-nowrap hidden md:table-cell">No</TableHead>
+                  <TableHead className="whitespace-nowrap">Tanggal</TableHead>
+                  <TableHead className="whitespace-nowrap">No. Pelanggan</TableHead>
+                  <TableHead className="whitespace-nowrap">Nama Pelanggan</TableHead>
+                  <TableHead className="whitespace-nowrap hidden md:table-cell">Area</TableHead>
+                  <TableHead className="whitespace-nowrap hidden md:table-cell">Paket</TableHead>
+                  <TableHead className="whitespace-nowrap">Jumlah</TableHead>
+                  <TableHead className="whitespace-nowrap">Metode</TableHead>
+                  <TableHead className="whitespace-nowrap hidden md:table-cell">No. Nota</TableHead>
+                  <TableHead className="whitespace-nowrap">Aksi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredTransactions.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8">
+                      Tidak ada data transaksi
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredTransactions.map((transaction, index) => {
+                    const customer = customers.find(c => c.id === transaction.customerId);
+                    return (
+                      <TableRow key={transaction.id}>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">{index + 1}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {new Date(transaction.createdAt).toLocaleDateString('id-ID')}
+                        </TableCell>
+                        <TableCell className="font-medium whitespace-nowrap">
+                          <Badge variant="secondary" className="bg-purple-600 text-white">
+                            {customer?.customerNumber}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{customer?.name}</TableCell>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">{customer?.area}</TableCell>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">{customer?.package}</TableCell>
+                        <TableCell className="font-semibold whitespace-nowrap">
+                          Rp {transaction.amount.toLocaleString('id-ID')}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <Badge 
+                            variant={transaction.method === 'cash' ? 'default' : 'secondary'}
+                            className={transaction.method === 'cash' ? 'bg-green-600' : 'bg-blue-600'}
+                          >
+                            {transaction.method === 'cash' ? 'Tunai' : 'Transfer'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap hidden md:table-cell">
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="outline">{transaction.receiptNumber}</Badge>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => copyReceiptUrl(transaction.receiptNumber || '')}
+                              title="Copy Link Nota"
+                              className="h-8 w-8 p-0"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="flex gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePrintReceipt(transaction)}
+                              title="Lihat/Print Nota"
+                              className="h-8 w-8 p-0"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleResendNotification(transaction)}
+                              title="Kirim Ulang ke WhatsApp"
+                              className="h-8 w-8 p-0"
+                            >
+                              <Send className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDelete(transaction.id)}
+                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                              title="Hapus Transaksi"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Receipt Dialog - tetap ada untuk fungsi lain */}
+      <Dialog open={showReceiptDialog} onOpenChange={setShowReceiptDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Nota Pembayaran</DialogTitle>
+            <DialogDescription>
+              Nota pembayaran untuk pelanggan
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTransaction && (
+            <div className="space-y-4">
+              <div className="bg-white p-6 border rounded-lg" id="receipt-content">
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-bold">NOTA PEMBAYARAN</h2>
+                  <p className="text-gray-600">LATANSA NETWORKS</p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <p><strong>No. Nota:</strong> {selectedTransaction.receiptNumber}</p>
+                    <p><strong>Tanggal:</strong> {new Date(selectedTransaction.createdAt).toLocaleDateString('id-ID')}</p>
+                  </div>
+                  <div>
+                    <p><strong>No. Pelanggan:</strong> {customers.find(c => c.id === selectedTransaction.customerId)?.customerNumber}</p>
+                    <p><strong>Nama:</strong> {selectedTransaction.customerName}</p>
+                  </div>
+                </div>
+                
+                <div className="border-t border-b py-4 mb-4">
+                  <div className="flex justify-between">
+                    <span>Pembayaran {customers.find(c => c.id === selectedTransaction.customerId)?.package}</span>
+                    <span>Rp {selectedTransaction.amount.toLocaleString('id-ID')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>
+                      Periode: {selectedTransaction.period && selectedTransaction.period.from && selectedTransaction.period.to ? 
+                        `${new Date(selectedTransaction.period.from).toLocaleDateString('id-ID')} - ${new Date(selectedTransaction.period.to).toLocaleDateString('id-ID')}` :
+                        'Periode tidak tersedia'
+                      }
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="flex justify-between font-bold text-lg">
+                  <span>Total:</span>
+                  <span>Rp {selectedTransaction.amount.toLocaleString('id-ID')}</span>
+                </div>
+                
+                <div className="mt-6 text-center text-sm text-gray-600">
+                  <p>Terima kasih atas pembayaran Anda</p>
+                  <p>Link nota: {generateReceiptUrl(selectedTransaction.receiptNumber || '')}</p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-2">
+                <Button variant="outline" onClick={() => setShowReceiptDialog(false)}>Tutup</Button>
+                <Button onClick={() => window.print()}>Print/Save PDF</Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => handleResendNotification(selectedTransaction)}
+                >
+                  <Send className="h-4 w-4 mr-2" />
+                  Kirim ke WhatsApp
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Konfirmasi Hapus Transaksi</DialogTitle>
+            <DialogDescription>
+              Anda yakin ingin menghapus transaksi ini?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>Batal</Button>
+            <Button className="bg-red-600 text-white hover:bg-red-700" onClick={confirmDelete}>Hapus</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default Transactions;
